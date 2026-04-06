@@ -1,8 +1,13 @@
-import { useState, useEffect, createContext, useContext } from "react";
+import { useState, useEffect, useRef, useCallback, createContext, useContext } from "react";
 import { Link, useLocation } from "wouter";
 import { useAuth } from "@/hooks/use-auth";
 import { useWebSocket } from "@/hooks/use-websocket";
+import { useQuery } from "@tanstack/react-query";
+import { apiRequest, queryClient } from "@/lib/queryClient";
 import { Button } from "@/components/ui/button";
+import { Popover, PopoverTrigger, PopoverContent } from "@/components/ui/popover";
+import { ScrollArea } from "@/components/ui/scroll-area";
+import type { Notification } from "@shared/schema";
 import {
   LayoutDashboard,
   MessageSquare,
@@ -15,7 +20,174 @@ import {
   X,
   Moon,
   Sun,
+  Bell,
+  CheckCheck,
+  MessageCircle,
+  ListTodo,
 } from "lucide-react";
+
+// ── Notification Bell Component ──────────────────
+function NotificationBell() {
+  const [, setLocation] = useLocation();
+  const [open, setOpen] = useState(false);
+  const prevCountRef = useRef(0);
+
+  const { data: unreadData } = useQuery<{ count: number }>({
+    queryKey: ["/api/notifications/unread-count"],
+    refetchInterval: 30000,
+  });
+
+  const { data: notifications = [], isLoading } = useQuery<Notification[]>({
+    queryKey: ["/api/notifications"],
+    enabled: open,
+  });
+
+  const unreadCount = unreadData?.count ?? 0;
+
+  // Play notification sound on new notifications
+  useEffect(() => {
+    if (unreadCount > prevCountRef.current && prevCountRef.current >= 0) {
+      // Use AudioContext to play a short notification beep
+      try {
+        const ctx = new AudioContext();
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        osc.frequency.value = 880;
+        osc.type = "sine";
+        gain.gain.value = 0.1;
+        osc.start();
+        gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.3);
+        osc.stop(ctx.currentTime + 0.3);
+      } catch {
+        // Audio not available, ignore
+      }
+    }
+    prevCountRef.current = unreadCount;
+  }, [unreadCount]);
+
+  const markAsRead = useCallback(async (id: number) => {
+    await apiRequest("PUT", `/api/notifications/${id}/read`);
+    queryClient.invalidateQueries({ queryKey: ["/api/notifications"] });
+    queryClient.invalidateQueries({ queryKey: ["/api/notifications/unread-count"] });
+  }, []);
+
+  const markAllRead = useCallback(async () => {
+    await apiRequest("POST", "/api/notifications/mark-all-read");
+    queryClient.invalidateQueries({ queryKey: ["/api/notifications"] });
+    queryClient.invalidateQueries({ queryKey: ["/api/notifications/unread-count"] });
+  }, []);
+
+  const handleClick = useCallback((notif: Notification) => {
+    if (!notif.read) markAsRead(notif.id);
+    if (notif.linkTo) {
+      setLocation(notif.linkTo);
+      setOpen(false);
+    }
+  }, [markAsRead, setLocation]);
+
+  function getIcon(type: string) {
+    switch (type) {
+      case "chat_message":
+        return <MessageCircle className="h-3.5 w-3.5 text-blue-400" />;
+      case "task_assigned":
+        return <ListTodo className="h-3.5 w-3.5 text-amber-400" />;
+      default:
+        return <Bell className="h-3.5 w-3.5 text-muted-foreground" />;
+    }
+  }
+
+  function timeAgo(dateStr: string) {
+    const diff = Date.now() - new Date(dateStr).getTime();
+    const mins = Math.floor(diff / 60000);
+    if (mins < 1) return "just now";
+    if (mins < 60) return `${mins}m ago`;
+    const hours = Math.floor(mins / 60);
+    if (hours < 24) return `${hours}h ago`;
+    return `${Math.floor(hours / 24)}d ago`;
+  }
+
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <button
+          className="relative p-1.5 rounded-md text-sidebar-foreground/70 hover:text-sidebar-foreground hover:bg-sidebar-accent/50 transition-colors"
+          data-testid="button-notifications"
+        >
+          <Bell className="h-4 w-4" />
+          {unreadCount > 0 && (
+            <span className="absolute -top-0.5 -right-0.5 flex items-center justify-center min-w-[16px] h-4 px-1 text-[10px] font-bold text-white bg-red-500 rounded-full leading-none">
+              {unreadCount > 99 ? "99+" : unreadCount}
+            </span>
+          )}
+        </button>
+      </PopoverTrigger>
+      <PopoverContent
+        side="right"
+        align="start"
+        sideOffset={12}
+        className="w-80 p-0 bg-popover border border-border shadow-lg rounded-lg"
+      >
+        <div className="flex items-center justify-between px-4 py-3 border-b border-border">
+          <h3 className="text-sm font-semibold">Notifications</h3>
+          {unreadCount > 0 && (
+            <button
+              onClick={markAllRead}
+              className="text-xs text-primary hover:underline flex items-center gap-1"
+              data-testid="button-mark-all-read"
+            >
+              <CheckCheck className="h-3 w-3" />
+              Mark all read
+            </button>
+          )}
+        </div>
+        <ScrollArea className="max-h-80">
+          {isLoading && open ? (
+            <div className="px-4 py-8 text-center text-sm text-muted-foreground">
+              Loading...
+            </div>
+          ) : notifications.length === 0 ? (
+            <div className="px-4 py-8 text-center text-sm text-muted-foreground">
+              No notifications yet
+            </div>
+          ) : (
+            <div className="divide-y divide-border">
+              {notifications.slice(0, 30).map((notif) => (
+                <button
+                  key={notif.id}
+                  onClick={() => handleClick(notif)}
+                  className={`w-full text-left px-4 py-3 hover:bg-accent/50 transition-colors flex gap-3 ${
+                    !notif.read ? "bg-primary/5" : ""
+                  }`}
+                  data-testid={`notification-item-${notif.id}`}
+                >
+                  <div className="mt-0.5 shrink-0">{getIcon(notif.type)}</div>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2">
+                      <span className={`text-sm truncate ${!notif.read ? "font-semibold" : "font-normal text-muted-foreground"}`}>
+                        {notif.title}
+                      </span>
+                      {!notif.read && (
+                        <span className="h-1.5 w-1.5 rounded-full bg-primary shrink-0" />
+                      )}
+                    </div>
+                    <p className="text-xs text-muted-foreground truncate mt-0.5">
+                      {notif.body}
+                    </p>
+                    <p className="text-[10px] text-muted-foreground/60 mt-1">
+                      {timeAgo(notif.createdAt)}
+                    </p>
+                  </div>
+                </button>
+              ))}
+            </div>
+          )}
+        </ScrollArea>
+      </PopoverContent>
+    </Popover>
+  );
+}
 
 type WSContext = {
   send: (event: string, data: any) => void;
@@ -90,30 +262,33 @@ export default function AppLayout({
             sidebarOpen ? "translate-x-0" : "-translate-x-full"
           }`}
         >
-          {/* Logo */}
-          <div className="flex items-center gap-2.5 px-5 py-5 border-b border-sidebar-border">
-            <svg
-              width="32"
-              height="32"
-              viewBox="0 0 40 40"
-              fill="none"
-              aria-label="HomeDirectAI Logo"
-            >
-              <rect
-                width="40"
-                height="40"
-                rx="8"
-                fill="hsl(230 80% 62%)"
-              />
-              <path
-                d="M20 10L10 18V30H16V24H24V30H30V18L20 10Z"
-                fill="white"
-              />
-              <circle cx="26" cy="14" r="3" fill="white" opacity="0.7" />
-            </svg>
-            <span className="font-semibold text-sm text-sidebar-foreground">
-              HomeDirectAI HQ
-            </span>
+          {/* Logo + Notification Bell */}
+          <div className="flex items-center justify-between px-5 py-5 border-b border-sidebar-border">
+            <div className="flex items-center gap-2.5">
+              <svg
+                width="32"
+                height="32"
+                viewBox="0 0 40 40"
+                fill="none"
+                aria-label="HomeDirectAI Logo"
+              >
+                <rect
+                  width="40"
+                  height="40"
+                  rx="8"
+                  fill="hsl(230 80% 62%)"
+                />
+                <path
+                  d="M20 10L10 18V30H16V24H24V30H30V18L20 10Z"
+                  fill="white"
+                />
+                <circle cx="26" cy="14" r="3" fill="white" opacity="0.7" />
+              </svg>
+              <span className="font-semibold text-sm text-sidebar-foreground">
+                HomeDirectAI HQ
+              </span>
+            </div>
+            <NotificationBell />
           </div>
 
           {/* Nav */}

@@ -5,7 +5,7 @@ import { storage } from "./storage";
 import {
   insertUserSchema, insertChannelSchema, insertMessageSchema,
   insertTaskSchema, insertTodoSchema, insertAnnouncementSchema,
-  insertMilestoneSchema,
+  insertMilestoneSchema, insertNotificationSchema,
 } from "@shared/schema";
 import session from "express-session";
 import MemoryStore from "memorystore";
@@ -216,13 +216,38 @@ export async function registerRoutes(
     const user = req.user as any;
     const task = storage.createTask({ ...req.body, createdBy: user.id });
     broadcastAll("task:created", task);
+    // Notify assigned user
+    if (task.assignedTo && task.assignedTo !== user.id) {
+      const assignedUser = storage.getUser(task.assignedTo);
+      if (assignedUser) {
+        notifyUser(
+          task.assignedTo,
+          "task_assigned",
+          "New Task Assigned",
+          `${user.displayName} assigned you: "${task.title}"`,
+          "/tasks"
+        );
+      }
+    }
     res.json(task);
   });
 
   app.put("/api/tasks/:id", requireAuth, (req, res) => {
+    const user = req.user as any;
+    const oldTask = storage.getTask(Number(req.params.id));
     const updated = storage.updateTask(Number(req.params.id), req.body);
     if (!updated) return res.status(404).json({ message: "Task not found" });
     broadcastAll("task:updated", updated);
+    // Notify if assignment changed
+    if (req.body.assignedTo && req.body.assignedTo !== oldTask?.assignedTo && req.body.assignedTo !== user.id) {
+      notifyUser(
+        req.body.assignedTo,
+        "task_assigned",
+        "Task Assigned to You",
+        `${user.displayName} assigned you: "${updated.title}"`,
+        "/tasks"
+      );
+    }
     res.json(updated);
   });
 
@@ -339,6 +364,41 @@ export async function registerRoutes(
     res.json(updated);
   });
 
+  // ── Notification Routes ──────────────────────────
+  app.get("/api/notifications", requireAuth, (req, res) => {
+    const user = req.user as any;
+    res.json(storage.getNotificationsByUser(user.id));
+  });
+
+  app.get("/api/notifications/unread-count", requireAuth, (req, res) => {
+    const user = req.user as any;
+    res.json({ count: storage.getUnreadCount(user.id) });
+  });
+
+  app.put("/api/notifications/:id/read", requireAuth, (req, res) => {
+    const updated = storage.markNotificationRead(Number(req.params.id));
+    if (!updated) return res.status(404).json({ message: "Notification not found" });
+    res.json(updated);
+  });
+
+  app.post("/api/notifications/mark-all-read", requireAuth, (req, res) => {
+    const user = req.user as any;
+    storage.markAllRead(user.id);
+    res.json({ ok: true });
+  });
+
+  // Helper: create notification and push via WebSocket
+  function notifyUser(userId: number, type: string, title: string, body: string, linkTo?: string) {
+    const notif = storage.createNotification({ userId, type, title, body, linkTo, read: 0 });
+    // Push to connected WebSocket clients for this user
+    wsClients.forEach((client) => {
+      if (client.userId === userId && client.ws.readyState === WebSocket.OPEN) {
+        client.ws.send(JSON.stringify({ event: "notification:new", data: notif }));
+      }
+    });
+    return notif;
+  }
+
   // ── Dashboard Stats ──────────────────────────────
   app.get("/api/dashboard/stats", requireAuth, (_req, res) => {
     const allTasks = storage.getAllTasks();
@@ -397,6 +457,25 @@ export async function registerRoutes(
               ...saved,
               user: user ? safeUser(user) : null,
             }, msg.data.channelId);
+
+            // Notify all other team members about the new chat message
+            if (user) {
+              const channel = storage.getChannel(msg.data.channelId);
+              const channelName = channel?.name || "chat";
+              const preview = msg.data.content.length > 80 ? msg.data.content.slice(0, 80) + "..." : msg.data.content;
+              const allUsers = storage.getAllUsers();
+              for (const u of allUsers) {
+                if (u.id !== client.userId) {
+                  notifyUser(
+                    u.id,
+                    "chat_message",
+                    `#${channelName}`,
+                    `${user.displayName}: ${preview}`,
+                    "/chat"
+                  );
+                }
+              }
+            }
           }
         }
 

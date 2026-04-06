@@ -142,3 +142,22 @@ export const insertMilestoneSchema = createInsertSchema(milestones).omit({
 });
 export type InsertMilestone = z.infer<typeof insertMilestoneSchema>;
 export type Milestone = typeof milestones.$inferSelect;
+
+// ── Notifications ─────────────────────────────────
+export const notifications = sqliteTable("notifications", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  userId: integer("user_id").notNull(), // recipient
+  type: text("type").notNull(), // chat_message | task_assigned | task_updated | announcement
+  title: text("title").notNull(),
+  body: text("body").notNull(),
+  linkTo: text("link_to"), // e.g. "/chat" or "/tasks"
+  read: integer("read").notNull().default(0),
+  createdAt: text("created_at").notNull().default(""),
+});
+
+export const insertNotificationSchema = createInsertSchema(notifications).omit({
+  id: true,
+  createdAt: true,
+});
+export type InsertNotification = z.infer<typeof insertNotificationSchema>;
+export type Notification = typeof notifications.$inferSelect;

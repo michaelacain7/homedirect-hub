@@ -70,6 +70,10 @@ export function useWebSocket(userId: number | null) {
           case "online:update":
             queryClient.invalidateQueries({ queryKey: ["/api/team"] });
             break;
+          case "notification:new":
+            queryClient.invalidateQueries({ queryKey: ["/api/notifications"] });
+            queryClient.invalidateQueries({ queryKey: ["/api/notifications/unread-count"] });
+            break;
         }
       } catch {
         // ignore non-JSON messages

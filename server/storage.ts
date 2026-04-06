@@ -7,13 +7,18 @@ import {
   type FileRecord, type InsertFile, files,
   type Announcement, type InsertAnnouncement, announcements,
   type Milestone, type InsertMilestone, milestones,
+  type Notification, type InsertNotification, notifications,
 } from "@shared/schema";
 import { drizzle } from "drizzle-orm/better-sqlite3";
 import Database from "better-sqlite3";
 import { eq, desc, and, asc } from "drizzle-orm";
 import { hashSync, compareSync } from "bcryptjs";
+import path from "path";
 
-const sqlite = new Database("data.db");
+// Use DATABASE_PATH env var for Railway Volume persistence, default to local
+const dbPath = process.env.DATABASE_PATH || "data.db";
+console.log(`[db] Using database at: ${dbPath}`);
+const sqlite = new Database(dbPath);
 sqlite.pragma("journal_mode = WAL");
 
 export const db = drizzle(sqlite);
@@ -69,6 +74,13 @@ export interface IStorage {
   getMilestones(): Milestone[];
   createMilestone(m: InsertMilestone): Milestone;
   updateMilestone(id: number, data: Partial<InsertMilestone>): Milestone | undefined;
+
+  // Notifications
+  getNotificationsByUser(userId: number, limit?: number): Notification[];
+  getUnreadCount(userId: number): number;
+  createNotification(n: InsertNotification): Notification;
+  markNotificationRead(id: number): Notification | undefined;
+  markAllRead(userId: number): void;
 
   // Auth helpers
   verifyPassword(plain: string, hash: string): boolean;
@@ -198,6 +210,24 @@ export class DatabaseStorage implements IStorage {
     return db.update(milestones).set(data).where(eq(milestones.id, id)).returning().get();
   }
 
+  // ── Notifications ──
+  getNotificationsByUser(userId: number, limit = 50): Notification[] {
+    return db.select().from(notifications).where(eq(notifications.userId, userId)).orderBy(desc(notifications.id)).limit(limit).all();
+  }
+  getUnreadCount(userId: number): number {
+    const result = db.select().from(notifications).where(and(eq(notifications.userId, userId), eq(notifications.read, 0))).all();
+    return result.length;
+  }
+  createNotification(data: InsertNotification): Notification {
+    return db.insert(notifications).values({ ...data, createdAt: now() }).returning().get();
+  }
+  markNotificationRead(id: number): Notification | undefined {
+    return db.update(notifications).set({ read: 1 }).where(eq(notifications.id, id)).returning().get();
+  }
+  markAllRead(userId: number): void {
+    db.update(notifications).set({ read: 1 }).where(and(eq(notifications.userId, userId), eq(notifications.read, 0))).run();
+  }
+
   // ── Auth ──
   hashPassword(plain: string): string {
     return hashSync(plain, 10);
@@ -277,6 +307,16 @@ export class DatabaseStorage implements IStorage {
         status TEXT NOT NULL DEFAULT 'pending',
         target_date TEXT,
         sort_order INTEGER NOT NULL DEFAULT 0,
+        created_at TEXT NOT NULL DEFAULT ''
+      );
+      CREATE TABLE IF NOT EXISTS notifications (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id INTEGER NOT NULL,
+        type TEXT NOT NULL,
+        title TEXT NOT NULL,
+        body TEXT NOT NULL,
+        link_to TEXT,
+        read INTEGER NOT NULL DEFAULT 0,
         created_at TEXT NOT NULL DEFAULT ''
       );
     `);
