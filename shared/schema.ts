@@ -1,0 +1,144 @@
+import { sqliteTable, text, integer } from "drizzle-orm/sqlite-core";
+import { createInsertSchema } from "drizzle-zod";
+import { z } from "zod";
+
+// ── Users ──────────────────────────────────────────
+export const users = sqliteTable("users", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  username: text("username").notNull().unique(),
+  email: text("email").notNull().unique(),
+  password: text("password").notNull(),
+  displayName: text("display_name").notNull(),
+  role: text("role").notNull().default("member"), // admin | member
+  avatarColor: text("avatar_color").notNull().default("#4F6BED"),
+  createdAt: text("created_at").notNull().default(""),
+});
+
+export const insertUserSchema = createInsertSchema(users).omit({
+  id: true,
+  createdAt: true,
+});
+export type InsertUser = z.infer<typeof insertUserSchema>;
+export type User = typeof users.$inferSelect;
+
+// ── Channels ───────────────────────────────────────
+export const channels = sqliteTable("channels", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  name: text("name").notNull().unique(),
+  description: text("description").notNull().default(""),
+  isDefault: integer("is_default").notNull().default(0),
+  createdAt: text("created_at").notNull().default(""),
+});
+
+export const insertChannelSchema = createInsertSchema(channels).omit({
+  id: true,
+  createdAt: true,
+});
+export type InsertChannel = z.infer<typeof insertChannelSchema>;
+export type Channel = typeof channels.$inferSelect;
+
+// ── Messages ───────────────────────────────────────
+export const messages = sqliteTable("messages", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  channelId: integer("channel_id").notNull(),
+  userId: integer("user_id").notNull(),
+  content: text("content").notNull(),
+  createdAt: text("created_at").notNull().default(""),
+});
+
+export const insertMessageSchema = createInsertSchema(messages).omit({
+  id: true,
+  createdAt: true,
+});
+export type InsertMessage = z.infer<typeof insertMessageSchema>;
+export type Message = typeof messages.$inferSelect;
+
+// ── Tasks (Delegation Board) ───────────────────────
+export const tasks = sqliteTable("tasks", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  title: text("title").notNull(),
+  description: text("description").notNull().default(""),
+  assignedTo: integer("assigned_to"),
+  createdBy: integer("created_by").notNull(),
+  status: text("status").notNull().default("todo"), // todo | in-progress | review | done
+  priority: text("priority").notNull().default("medium"), // low | medium | high | urgent
+  category: text("category").notNull().default("general"), // engineering | product | marketing | legal | operations | general
+  dueDate: text("due_date"),
+  createdAt: text("created_at").notNull().default(""),
+});
+
+export const insertTaskSchema = createInsertSchema(tasks).omit({
+  id: true,
+  createdAt: true,
+});
+export type InsertTask = z.infer<typeof insertTaskSchema>;
+export type Task = typeof tasks.$inferSelect;
+
+// ── Todos (Personal) ──────────────────────────────
+export const todos = sqliteTable("todos", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  userId: integer("user_id").notNull(),
+  content: text("content").notNull(),
+  completed: integer("completed").notNull().default(0),
+  createdAt: text("created_at").notNull().default(""),
+});
+
+export const insertTodoSchema = createInsertSchema(todos).omit({
+  id: true,
+  createdAt: true,
+});
+export type InsertTodo = z.infer<typeof insertTodoSchema>;
+export type Todo = typeof todos.$inferSelect;
+
+// ── Files (Shared) ────────────────────────────────
+export const files = sqliteTable("files", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  userId: integer("user_id").notNull(),
+  originalName: text("original_name").notNull(),
+  storedName: text("stored_name").notNull(),
+  size: integer("size").notNull(),
+  mimeType: text("mime_type").notNull().default("application/octet-stream"),
+  createdAt: text("created_at").notNull().default(""),
+});
+
+export const insertFileSchema = createInsertSchema(files).omit({
+  id: true,
+  createdAt: true,
+});
+export type InsertFile = z.infer<typeof insertFileSchema>;
+export type FileRecord = typeof files.$inferSelect;
+
+// ── Announcements ─────────────────────────────────
+export const announcements = sqliteTable("announcements", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  userId: integer("user_id").notNull(),
+  title: text("title").notNull(),
+  content: text("content").notNull(),
+  pinned: integer("pinned").notNull().default(0),
+  createdAt: text("created_at").notNull().default(""),
+});
+
+export const insertAnnouncementSchema = createInsertSchema(announcements).omit({
+  id: true,
+  createdAt: true,
+});
+export type InsertAnnouncement = z.infer<typeof insertAnnouncementSchema>;
+export type Announcement = typeof announcements.$inferSelect;
+
+// ── Milestones ────────────────────────────────────
+export const milestones = sqliteTable("milestones", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  title: text("title").notNull(),
+  description: text("description").notNull().default(""),
+  status: text("status").notNull().default("pending"), // pending | in-progress | completed
+  targetDate: text("target_date"),
+  sortOrder: integer("sort_order").notNull().default(0),
+  createdAt: text("created_at").notNull().default(""),
+});
+
+export const insertMilestoneSchema = createInsertSchema(milestones).omit({
+  id: true,
+  createdAt: true,
+});
+export type InsertMilestone = z.infer<typeof insertMilestoneSchema>;
+export type Milestone = typeof milestones.$inferSelect;

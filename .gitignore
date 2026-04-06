@@ -1,0 +1,7 @@
+node_modules/
+dist/
+data.db
+uploads/
+*.log
+.env
+frontend-spec.md
