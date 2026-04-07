@@ -8,6 +8,7 @@ import {
   type Announcement, type InsertAnnouncement, announcements,
   type Milestone, type InsertMilestone, milestones,
   type Notification, type InsertNotification, notifications,
+  type MessageReaction, type InsertMessageReaction, messageReactions,
   type CalendarEvent, type InsertCalendarEvent, calendarEvents,
 } from "@shared/schema";
 import { drizzle } from "drizzle-orm/better-sqlite3";
@@ -82,6 +83,13 @@ export interface IStorage {
   createNotification(n: InsertNotification): Notification;
   markNotificationRead(id: number): Notification | undefined;
   markAllRead(userId: number): void;
+
+  // Message Reactions
+  getReactionsByMessage(messageId: number): MessageReaction[];
+  getReactionsByMessages(messageIds: number[]): MessageReaction[];
+  addReaction(data: InsertMessageReaction): MessageReaction;
+  removeReaction(messageId: number, userId: number, emoji: string): void;
+  findReaction(messageId: number, userId: number, emoji: string): MessageReaction | undefined;
 
   // Calendar Events
   getAllCalendarEvents(): CalendarEvent[];
@@ -237,6 +245,31 @@ export class DatabaseStorage implements IStorage {
     db.update(notifications).set({ read: 1 }).where(and(eq(notifications.userId, userId), eq(notifications.read, 0))).run();
   }
 
+  // ── Message Reactions ──
+  getReactionsByMessage(messageId: number): MessageReaction[] {
+    return db.select().from(messageReactions).where(eq(messageReactions.messageId, messageId)).all();
+  }
+  getReactionsByMessages(messageIds: number[]): MessageReaction[] {
+    if (!messageIds.length) return [];
+    // Use raw SQL IN query for batch fetch
+    const placeholders = messageIds.map(() => '?').join(',');
+    const stmt = sqlite.prepare(`SELECT * FROM message_reactions WHERE message_id IN (${placeholders})`);
+    return stmt.all(...messageIds) as MessageReaction[];
+  }
+  addReaction(data: InsertMessageReaction): MessageReaction {
+    return db.insert(messageReactions).values(data).returning().get();
+  }
+  removeReaction(messageId: number, userId: number, emoji: string): void {
+    db.delete(messageReactions)
+      .where(and(eq(messageReactions.messageId, messageId), eq(messageReactions.userId, userId), eq(messageReactions.emoji, emoji)))
+      .run();
+  }
+  findReaction(messageId: number, userId: number, emoji: string): MessageReaction | undefined {
+    return db.select().from(messageReactions)
+      .where(and(eq(messageReactions.messageId, messageId), eq(messageReactions.userId, userId), eq(messageReactions.emoji, emoji)))
+      .get();
+  }
+
   // ── Calendar Events ──
   getAllCalendarEvents(): CalendarEvent[] {
     return db.select().from(calendarEvents).orderBy(asc(calendarEvents.startDate)).all();
@@ -360,6 +393,13 @@ export class DatabaseStorage implements IStorage {
         link_to TEXT,
         read INTEGER NOT NULL DEFAULT 0,
         created_at TEXT NOT NULL DEFAULT ''
+      );
+      CREATE TABLE IF NOT EXISTS message_reactions (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        message_id INTEGER NOT NULL,
+        user_id INTEGER NOT NULL,
+        emoji TEXT NOT NULL,
+        UNIQUE(message_id, user_id, emoji)
       );
     `);
 

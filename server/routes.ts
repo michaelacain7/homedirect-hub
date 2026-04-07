@@ -194,9 +194,18 @@ export async function registerRoutes(
   // ── Message Routes ───────────────────────────────
   app.get("/api/messages/:channelId", requireAuth, (req, res) => {
     const msgs = storage.getMessagesByChannel(Number(req.params.channelId));
+    const msgIds = msgs.map(m => m.id);
+    const allReactions = storage.getReactionsByMessages(msgIds);
+    const reactionsByMsg = new Map<number, typeof allReactions>();
+    for (const r of allReactions) {
+      const list = reactionsByMsg.get(r.messageId) || [];
+      list.push(r);
+      reactionsByMsg.set(r.messageId, list);
+    }
     res.json(msgs.map((m) => ({
       ...m,
       user: m.user ? safeUser(m.user) : null,
+      reactions: reactionsByMsg.get(m.id) || [],
     })));
   });
 
@@ -570,6 +579,23 @@ export async function registerRoutes(
                 }
               }
             }
+          }
+        }
+
+        if (msg.event === "chat:reaction") {
+          const client = wsClients.get(ws);
+          if (client) {
+            const { messageId, emoji } = msg.data;
+            // Toggle: if already reacted, remove; otherwise add
+            const existing = storage.findReaction(messageId, client.userId, emoji);
+            if (existing) {
+              storage.removeReaction(messageId, client.userId, emoji);
+            } else {
+              storage.addReaction({ messageId, userId: client.userId, emoji });
+            }
+            // Fetch updated reactions for this message and broadcast to everyone
+            const reactions = storage.getReactionsByMessage(messageId);
+            broadcastAll("chat:reaction", { messageId, reactions });
           }
         }
 

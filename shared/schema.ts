@@ -162,6 +162,20 @@ export const insertNotificationSchema = createInsertSchema(notifications).omit({
 export type InsertNotification = z.infer<typeof insertNotificationSchema>;
 export type Notification = typeof notifications.$inferSelect;
 
+// ── Message Reactions ─────────────────────────────
+export const messageReactions = sqliteTable("message_reactions", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  messageId: integer("message_id").notNull(),
+  userId: integer("user_id").notNull(),
+  emoji: text("emoji").notNull(), // e.g. "👍", "❤️", "😂"
+});
+
+export const insertMessageReactionSchema = createInsertSchema(messageReactions).omit({
+  id: true,
+});
+export type InsertMessageReaction = z.infer<typeof insertMessageReactionSchema>;
+export type MessageReaction = typeof messageReactions.$inferSelect;
+
 // ── Calendar Events ───────────────────────────────
 export const calendarEvents = sqliteTable("calendar_events", {
   id: integer("id").primaryKey({ autoIncrement: true }),

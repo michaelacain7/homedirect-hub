@@ -13,9 +13,13 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
-import { Hash, Plus, Send, Loader2, AtSign } from "lucide-react";
+import { Popover, PopoverTrigger, PopoverContent } from "@/components/ui/popover";
+import { Hash, Plus, Send, Loader2, AtSign, SmilePlus } from "lucide-react";
 import { formatDistanceToNow, format } from "date-fns";
-import type { Channel, Message, User } from "@shared/schema";
+import type { Channel, Message, User, MessageReaction } from "@shared/schema";
+
+// Common reaction emojis
+const REACTION_EMOJIS = ["👍", "❤️", "😂", "🎉", "🔥", "👀", "✅", "💯"];
 
 function getInitials(name: string) {
   return name
@@ -141,7 +145,7 @@ export default function ChatPage() {
   }, [channels, activeChannel]);
 
   const { data: messages, isLoading: messagesLoading } = useQuery<
-    (Message & { user?: { displayName: string; avatarColor: string } })[]
+    (Message & { user?: { displayName: string; avatarColor: string }; reactions?: MessageReaction[] })[]
   >({
     queryKey: ["/api/messages", activeChannel],
     enabled: !!activeChannel,
@@ -175,6 +179,23 @@ export default function ChatPage() {
       queryClient.invalidateQueries({
         queryKey: ["/api/messages", activeChannel],
       });
+    });
+    return unsub;
+  }, [ws, activeChannel]);
+
+  // Listen for reaction updates
+  useEffect(() => {
+    const unsub = ws.on("chat:reaction", (data: any) => {
+      // Optimistically update the cached messages with new reactions
+      queryClient.setQueryData(
+        ["/api/messages", activeChannel],
+        (old: any[] | undefined) => {
+          if (!old) return old;
+          return old.map((msg: any) =>
+            msg.id === data.messageId ? { ...msg, reactions: data.reactions } : msg
+          );
+        }
+      );
     });
     return unsub;
   }, [ws, activeChannel]);
@@ -218,6 +239,10 @@ export default function ChatPage() {
     setHighlightMsgId(null);
     deepLinkActive.current = false; // re-enable auto-scroll after user interacts
   }, [messageText, activeChannel, ws]);
+
+  const toggleReaction = useCallback((messageId: number, emoji: string) => {
+    ws.send("chat:reaction", { messageId, emoji });
+  }, [ws]);
 
   // @mention autocomplete filtering
   const mentionCandidates = useMemo(() => {
@@ -423,40 +448,102 @@ export default function ChatPage() {
               </p>
             </div>
           ) : (
-            messages.map((msg) => (
-              <div
-                key={msg.id}
-                className="flex gap-3 rounded-md px-2 py-1.5 -mx-2 transition-colors"
-                data-testid={`message-${msg.id}`}
-              >
+            messages.map((msg) => {
+              // Group reactions: { emoji: string, count: number, userIds: number[] }
+              const reactionGroups = (msg.reactions || []).reduce<Record<string, { emoji: string; count: number; userIds: number[] }>>((acc, r) => {
+                const key = r.emoji;
+                if (!acc[key]) acc[key] = { emoji: key, count: 0, userIds: [] };
+                acc[key].count++;
+                acc[key].userIds.push(r.userId ?? (r as any).user_id);
+                return acc;
+              }, {});
+              const groupedReactions = Object.values(reactionGroups);
+
+              return (
                 <div
-                  className="h-8 w-8 rounded-full flex items-center justify-center text-[10px] font-semibold text-white shrink-0"
-                  style={{
-                    backgroundColor:
-                      (msg as any).user?.avatarColor || "#4F6BED",
-                  }}
+                  key={msg.id}
+                  className="group flex gap-3 rounded-md px-2 py-1.5 -mx-2 transition-colors relative"
+                  data-testid={`message-${msg.id}`}
                 >
-                  {getInitials(
-                    (msg as any).user?.displayName || "?"
-                  )}
-                </div>
-                <div className="min-w-0">
-                  <div className="flex items-baseline gap-2">
-                    <span className="text-sm font-semibold">
-                      {(msg as any).user?.displayName || "Unknown"}
-                    </span>
-                    <span className="text-[11px] text-muted-foreground">
-                      {msg.createdAt
-                        ? format(new Date(msg.createdAt), "h:mm a")
-                        : ""}
-                    </span>
+                  <div
+                    className="h-8 w-8 rounded-full flex items-center justify-center text-[10px] font-semibold text-white shrink-0"
+                    style={{
+                      backgroundColor:
+                        (msg as any).user?.avatarColor || "#4F6BED",
+                    }}
+                  >
+                    {getInitials(
+                      (msg as any).user?.displayName || "?"
+                    )}
                   </div>
-                  <p className="text-sm text-foreground/90 whitespace-pre-wrap break-words">
-                    <RenderContent content={msg.content} teamMembers={teamMembers} />
-                  </p>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-baseline gap-2">
+                      <span className="text-sm font-semibold">
+                        {(msg as any).user?.displayName || "Unknown"}
+                      </span>
+                      <span className="text-[11px] text-muted-foreground">
+                        {msg.createdAt
+                          ? format(new Date(msg.createdAt), "h:mm a")
+                          : ""}
+                      </span>
+                    </div>
+                    <p className="text-sm text-foreground/90 whitespace-pre-wrap break-words">
+                      <RenderContent content={msg.content} teamMembers={teamMembers} />
+                    </p>
+
+                    {/* Reaction chips */}
+                    {groupedReactions.length > 0 && (
+                      <div className="flex flex-wrap gap-1 mt-1">
+                        {groupedReactions.map((rg) => {
+                          const isMine = user ? rg.userIds.includes(user.id) : false;
+                          return (
+                            <button
+                              key={rg.emoji}
+                              onClick={() => toggleReaction(msg.id, rg.emoji)}
+                              className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-xs border transition-colors ${
+                                isMine
+                                  ? "bg-primary/15 border-primary/30 text-primary"
+                                  : "bg-muted/50 border-border hover:bg-muted"
+                              }`}
+                              data-testid={`reaction-${msg.id}-${rg.emoji}`}
+                            >
+                              <span>{rg.emoji}</span>
+                              <span className="font-medium">{rg.count}</span>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Emoji picker button (visible on hover) */}
+                  <Popover>
+                    <PopoverTrigger asChild>
+                      <button
+                        className="absolute top-1 right-1 opacity-0 group-hover:opacity-100 transition-opacity p-1 rounded hover:bg-muted"
+                        data-testid={`reaction-picker-${msg.id}`}
+                      >
+                        <SmilePlus className="h-3.5 w-3.5 text-muted-foreground" />
+                      </button>
+                    </PopoverTrigger>
+                    <PopoverContent side="top" align="end" className="w-auto p-1.5">
+                      <div className="flex gap-0.5">
+                        {REACTION_EMOJIS.map((emoji) => (
+                          <button
+                            key={emoji}
+                            onClick={() => toggleReaction(msg.id, emoji)}
+                            className="hover:bg-muted rounded p-1 text-lg transition-transform hover:scale-125"
+                            data-testid={`emoji-pick-${emoji}`}
+                          >
+                            {emoji}
+                          </button>
+                        ))}
+                      </div>
+                    </PopoverContent>
+                  </Popover>
                 </div>
-              </div>
-            ))
+              );
+            })
           )}
           <div ref={messagesEndRef} />
         </div>
