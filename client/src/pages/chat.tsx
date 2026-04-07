@@ -14,7 +14,7 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Popover, PopoverTrigger, PopoverContent } from "@/components/ui/popover";
-import { Hash, Plus, Send, Loader2, AtSign, SmilePlus } from "lucide-react";
+import { Hash, Plus, Send, Loader2, AtSign, SmilePlus, Search, X } from "lucide-react";
 import { formatDistanceToNow, format } from "date-fns";
 import type { Channel, Message, User, MessageReaction } from "@shared/schema";
 
@@ -102,6 +102,11 @@ export default function ChatPage() {
   const hasScrolledToMsg = useRef(false);
   const deepLinkActive = useRef(false); // blocks auto-scroll while deep-link is pending
 
+  // Search state
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
+  const searchInputRef = useRef<HTMLInputElement>(null);
+
   // @mention autocomplete state
   const [mentionQuery, setMentionQuery] = useState<string | null>(null);
   const [mentionIndex, setMentionIndex] = useState(0);
@@ -109,6 +114,18 @@ export default function ChatPage() {
 
   const { data: channels, isLoading: channelsLoading } = useQuery<Channel[]>({
     queryKey: ["/api/channels"],
+  });
+
+  // Chat search query
+  const { data: searchResults } = useQuery<
+    { id: number; channelId: number; userId: number; content: string; createdAt: string; user?: { displayName: string; avatarColor: string }; channelName?: string }[]
+  >({
+    queryKey: ["/api/messages/search", searchQuery],
+    queryFn: async () => {
+      const res = await apiRequest("GET", `/api/messages/search?q=${encodeURIComponent(searchQuery)}`);
+      return res.json();
+    },
+    enabled: searchQuery.length >= 2,
   });
 
   // Team members for @mention
@@ -418,12 +435,95 @@ export default function ChatPage() {
         {/* Channel header */}
         {activeChannel && channels && (
           <div className="px-4 py-3 border-b border-border">
-            <div className="flex items-center gap-2">
-              <Hash className="h-4 w-4 text-muted-foreground" />
-              <span className="text-sm font-semibold">
-                {channels.find((c) => c.id === activeChannel)?.name}
-              </span>
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Hash className="h-4 w-4 text-muted-foreground" />
+                <span className="text-sm font-semibold">
+                  {channels.find((c) => c.id === activeChannel)?.name}
+                </span>
+              </div>
+              <button
+                onClick={() => {
+                  setSearchOpen(!searchOpen);
+                  if (!searchOpen) {
+                    setTimeout(() => searchInputRef.current?.focus(), 100);
+                  } else {
+                    setSearchQuery("");
+                  }
+                }}
+                className={`p-1.5 rounded-md transition-colors ${searchOpen ? 'bg-primary/10 text-primary' : 'text-muted-foreground hover:text-foreground hover:bg-muted'}`}
+                data-testid="button-toggle-chat-search"
+              >
+                <Search className="h-4 w-4" />
+              </button>
             </div>
+          </div>
+        )}
+
+        {/* Chat search panel */}
+        {searchOpen && (
+          <div className="border-b border-border bg-muted/30 px-4 py-2 space-y-2">
+            <div className="relative">
+              <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
+              <Input
+                ref={searchInputRef}
+                placeholder="Search messages across all channels..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="h-8 pl-8 pr-8 text-xs"
+                data-testid="input-search-chat"
+              />
+              {searchQuery && (
+                <button
+                  onClick={() => setSearchQuery("")}
+                  className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                  data-testid="button-clear-chat-search"
+                >
+                  <X className="h-3.5 w-3.5" />
+                </button>
+              )}
+            </div>
+            {searchQuery.length >= 2 && searchResults && (
+              <div className="max-h-64 overflow-y-auto space-y-1">
+                {searchResults.length === 0 ? (
+                  <p className="text-xs text-muted-foreground py-2 text-center">No messages found</p>
+                ) : (
+                  <>
+                    <p className="text-[11px] text-muted-foreground">{searchResults.length} result{searchResults.length !== 1 ? 's' : ''}</p>
+                    {searchResults.map((result) => (
+                      <button
+                        key={result.id}
+                        className="w-full text-left flex gap-2 p-2 rounded-md hover:bg-muted transition-colors"
+                        onClick={() => {
+                          // Navigate to the channel and highlight the message
+                          setActiveChannel(result.channelId);
+                          setHighlightMsgId(result.id);
+                          hasScrolledToMsg.current = false;
+                          deepLinkActive.current = true;
+                          setSearchOpen(false);
+                          setSearchQuery("");
+                        }}
+                        data-testid={`search-result-${result.id}`}
+                      >
+                        <div
+                          className="h-6 w-6 rounded-full flex items-center justify-center text-[9px] font-semibold text-white shrink-0 mt-0.5"
+                          style={{ backgroundColor: result.user?.avatarColor || '#4F6BED' }}
+                        >
+                          {getInitials(result.user?.displayName || '?')}
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          <div className="flex items-center gap-1.5">
+                            <span className="text-xs font-medium">{result.user?.displayName || 'Unknown'}</span>
+                            <span className="text-[10px] text-muted-foreground">in #{result.channelName}</span>
+                          </div>
+                          <p className="text-xs text-muted-foreground truncate">{result.content}</p>
+                        </div>
+                      </button>
+                    ))}
+                  </>
+                )}
+              </div>
+            )}
           </div>
         )}
 

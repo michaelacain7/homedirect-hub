@@ -84,6 +84,9 @@ export interface IStorage {
   markNotificationRead(id: number): Notification | undefined;
   markAllRead(userId: number): void;
 
+  // Message Search
+  searchMessages(query: string, channelId?: number): (Message & { user?: { displayName: string; avatarColor: string }; channelName?: string })[];
+
   // Message Reactions
   getReactionsByMessage(messageId: number): MessageReaction[];
   getReactionsByMessages(messageIds: number[]): MessageReaction[];
@@ -243,6 +246,34 @@ export class DatabaseStorage implements IStorage {
   }
   markAllRead(userId: number): void {
     db.update(notifications).set({ read: 1 }).where(and(eq(notifications.userId, userId), eq(notifications.read, 0))).run();
+  }
+
+  // ── Message Search ──
+  searchMessages(query: string, channelId?: number) {
+    const q = `%${query}%`;
+    let sql = `
+      SELECT m.*, u.display_name, u.avatar_color, c.name as channel_name
+      FROM messages m
+      LEFT JOIN users u ON m.user_id = u.id
+      LEFT JOIN channels c ON m.channel_id = c.id
+      WHERE m.content LIKE ?
+    `;
+    const params: any[] = [q];
+    if (channelId) {
+      sql += ` AND m.channel_id = ?`;
+      params.push(channelId);
+    }
+    sql += ` ORDER BY m.created_at DESC LIMIT 50`;
+    const rows = sqlite.prepare(sql).all(...params) as any[];
+    return rows.map((r: any) => ({
+      id: r.id,
+      channelId: r.channel_id,
+      userId: r.user_id,
+      content: r.content,
+      createdAt: r.created_at,
+      user: r.display_name ? { displayName: r.display_name, avatarColor: r.avatar_color } : undefined,
+      channelName: r.channel_name || undefined,
+    }));
   }
 
   // ── Message Reactions ──

@@ -21,7 +21,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Plus, Loader2, Trash2, Calendar } from "lucide-react";
+import { Plus, Loader2, Trash2, Calendar, Search, X } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
 import { useToast } from "@/hooks/use-toast";
 import type { Task, User } from "@shared/schema";
@@ -68,9 +68,11 @@ export default function TasksPage() {
   const { toast } = useToast();
   const [selectedTask, setSelectedTask] = useState<TaskWithUsers | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
   const [filterAssignee, setFilterAssignee] = useState("all");
   const [filterPriority, setFilterPriority] = useState("all");
   const [filterCategory, setFilterCategory] = useState("all");
+  const [filterStatus, setFilterStatus] = useState("all");
 
   // Form states
   const [formTitle, setFormTitle] = useState("");
@@ -148,9 +150,16 @@ export default function TasksPage() {
   }
 
   const filteredTasks = (tasks || []).filter((t) => {
+    if (searchQuery) {
+      const q = searchQuery.toLowerCase();
+      const matchTitle = t.title.toLowerCase().includes(q);
+      const matchDesc = (t.description || "").toLowerCase().includes(q);
+      if (!matchTitle && !matchDesc) return false;
+    }
     if (filterAssignee !== "all" && t.assignedTo?.toString() !== filterAssignee) return false;
     if (filterPriority !== "all" && t.priority !== filterPriority) return false;
     if (filterCategory !== "all" && t.category !== filterCategory) return false;
+    if (filterStatus !== "all" && t.status !== filterStatus) return false;
     return true;
   });
 
@@ -170,8 +179,27 @@ export default function TasksPage() {
         </Button>
       </div>
 
-      {/* Filters */}
-      <div className="flex flex-wrap gap-2">
+      {/* Search & Filters */}
+      <div className="flex flex-wrap gap-2 items-center">
+        <div className="relative">
+          <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
+          <Input
+            placeholder="Search tasks..."
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            className="h-8 w-52 pl-8 pr-8 text-xs"
+            data-testid="input-search-tasks"
+          />
+          {searchQuery && (
+            <button
+              onClick={() => setSearchQuery("")}
+              className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+              data-testid="button-clear-task-search"
+            >
+              <X className="h-3.5 w-3.5" />
+            </button>
+          )}
+        </div>
         <Select value={filterAssignee} onValueChange={setFilterAssignee}>
           <SelectTrigger className="h-8 w-36 text-xs" data-testid="filter-assignee">
             <SelectValue placeholder="Assignee" />
@@ -211,6 +239,35 @@ export default function TasksPage() {
             <SelectItem value="general">General</SelectItem>
           </SelectContent>
         </Select>
+        <Select value={filterStatus} onValueChange={setFilterStatus}>
+          <SelectTrigger className="h-8 w-32 text-xs" data-testid="filter-status">
+            <SelectValue placeholder="Status" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All Statuses</SelectItem>
+            <SelectItem value="todo">To Do</SelectItem>
+            <SelectItem value="in-progress">In Progress</SelectItem>
+            <SelectItem value="review">Review</SelectItem>
+            <SelectItem value="done">Done</SelectItem>
+          </SelectContent>
+        </Select>
+        {(searchQuery || filterAssignee !== "all" || filterPriority !== "all" || filterCategory !== "all" || filterStatus !== "all") && (
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-8 text-xs"
+            onClick={() => {
+              setSearchQuery("");
+              setFilterAssignee("all");
+              setFilterPriority("all");
+              setFilterCategory("all");
+              setFilterStatus("all");
+            }}
+            data-testid="button-clear-filters"
+          >
+            <X className="h-3 w-3 mr-1" /> Clear all
+          </Button>
+        )}
       </div>
 
       {/* Kanban Board */}

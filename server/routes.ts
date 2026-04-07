@@ -192,6 +192,14 @@ export async function registerRoutes(
   });
 
   // ── Message Routes ───────────────────────────────
+  app.get("/api/messages/search", requireAuth, (req, res) => {
+    const query = (req.query.q as string) || "";
+    const channelId = req.query.channelId ? Number(req.query.channelId) : undefined;
+    if (!query || query.length < 2) return res.json([]);
+    const results = storage.searchMessages(query, channelId);
+    res.json(results);
+  });
+
   app.get("/api/messages/:channelId", requireAuth, (req, res) => {
     const msgs = storage.getMessagesByChannel(Number(req.params.channelId));
     const msgIds = msgs.map(m => m.id);
