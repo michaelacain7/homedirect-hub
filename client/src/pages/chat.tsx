@@ -103,8 +103,6 @@ export default function ChatPage() {
   const [mentionIndex, setMentionIndex] = useState(0);
   const [mentionStart, setMentionStart] = useState(-1); // cursor position of the @
 
-  const isAdmin = user?.role === "admin";
-
   const { data: channels, isLoading: channelsLoading } = useQuery<Channel[]>({
     queryKey: ["/api/channels"],
   });
@@ -318,56 +316,54 @@ export default function ChatPage() {
       <div className="w-56 shrink-0 border-r border-border bg-muted/30 flex flex-col">
         <div className="p-3 border-b border-border flex items-center justify-between">
           <span className="text-sm font-semibold">Channels</span>
-          {isAdmin && (
-            <Dialog open={newChannelOpen} onOpenChange={setNewChannelOpen}>
-              <DialogTrigger asChild>
+          <Dialog open={newChannelOpen} onOpenChange={setNewChannelOpen}>
+            <DialogTrigger asChild>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-6 w-6"
+                data-testid="button-new-channel"
+              >
+                <Plus className="h-3.5 w-3.5" />
+              </Button>
+            </DialogTrigger>
+            <DialogContent>
+              <DialogHeader>
+                <DialogTitle>New Channel</DialogTitle>
+              </DialogHeader>
+              <form
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  createChannel.mutate({
+                    name: channelName,
+                    description: channelDesc,
+                  });
+                }}
+                className="space-y-3"
+              >
+                <Input
+                  placeholder="Channel name"
+                  value={channelName}
+                  onChange={(e) => setChannelName(e.target.value)}
+                  required
+                  data-testid="input-channel-name"
+                />
+                <Input
+                  placeholder="Description (optional)"
+                  value={channelDesc}
+                  onChange={(e) => setChannelDesc(e.target.value)}
+                  data-testid="input-channel-desc"
+                />
                 <Button
-                  variant="ghost"
-                  size="icon"
-                  className="h-6 w-6"
-                  data-testid="button-new-channel"
+                  type="submit"
+                  disabled={createChannel.isPending}
+                  data-testid="button-submit-channel"
                 >
-                  <Plus className="h-3.5 w-3.5" />
+                  Create
                 </Button>
-              </DialogTrigger>
-              <DialogContent>
-                <DialogHeader>
-                  <DialogTitle>New Channel</DialogTitle>
-                </DialogHeader>
-                <form
-                  onSubmit={(e) => {
-                    e.preventDefault();
-                    createChannel.mutate({
-                      name: channelName,
-                      description: channelDesc,
-                    });
-                  }}
-                  className="space-y-3"
-                >
-                  <Input
-                    placeholder="Channel name"
-                    value={channelName}
-                    onChange={(e) => setChannelName(e.target.value)}
-                    required
-                    data-testid="input-channel-name"
-                  />
-                  <Input
-                    placeholder="Description (optional)"
-                    value={channelDesc}
-                    onChange={(e) => setChannelDesc(e.target.value)}
-                    data-testid="input-channel-desc"
-                  />
-                  <Button
-                    type="submit"
-                    disabled={createChannel.isPending}
-                    data-testid="button-submit-channel"
-                  >
-                    Create
-                  </Button>
-                </form>
-              </DialogContent>
-            </Dialog>
-          )}
+              </form>
+            </DialogContent>
+          </Dialog>
         </div>
         <div className="flex-1 overflow-y-auto p-2 space-y-0.5">
           {channelsLoading
