@@ -14,6 +14,7 @@ export function useWebSocket(userId: number | null) {
   const wsRef = useRef<WebSocket | null>(null);
   const handlersRef = useRef<Map<string, Set<WSHandler>>>(new Map());
   const reconnectTimeoutRef = useRef<ReturnType<typeof setTimeout>>();
+  const pingIntervalRef = useRef<ReturnType<typeof setInterval>>();
   const [isConnected, setIsConnected] = useState(false);
 
   const connect = useCallback(() => {
@@ -33,6 +34,13 @@ export function useWebSocket(userId: number | null) {
     ws.onopen = () => {
       setIsConnected(true);
       ws.send(JSON.stringify({ event: "auth", data: { userId } }));
+      // Keepalive ping every 25s to prevent proxy idle timeout
+      if (pingIntervalRef.current) clearInterval(pingIntervalRef.current);
+      pingIntervalRef.current = setInterval(() => {
+        if (ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify({ event: "ping", data: {} }));
+        }
+      }, 25000);
     };
 
     ws.onmessage = (evt) => {
@@ -92,10 +100,11 @@ export function useWebSocket(userId: number | null) {
 
     ws.onclose = () => {
       setIsConnected(false);
-      // Auto-reconnect after 3 seconds
+      if (pingIntervalRef.current) clearInterval(pingIntervalRef.current);
+      // Auto-reconnect after 2 seconds
       reconnectTimeoutRef.current = setTimeout(() => {
         connect();
-      }, 3000);
+      }, 2000);
     };
 
     ws.onerror = () => {
@@ -109,14 +118,19 @@ export function useWebSocket(userId: number | null) {
       if (reconnectTimeoutRef.current) {
         clearTimeout(reconnectTimeoutRef.current);
       }
+      if (pingIntervalRef.current) {
+        clearInterval(pingIntervalRef.current);
+      }
       wsRef.current?.close();
     };
   }, [connect]);
 
-  const send = useCallback((event: string, data: any) => {
+  const send = useCallback((event: string, data: any): boolean => {
     if (wsRef.current?.readyState === WebSocket.OPEN) {
       wsRef.current.send(JSON.stringify({ event, data }));
+      return true;
     }
+    return false;
   }, []);
 
   const on = useCallback((event: string, handler: WSHandler) => {

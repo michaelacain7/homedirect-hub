@@ -14,8 +14,9 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Popover, PopoverTrigger, PopoverContent } from "@/components/ui/popover";
-import { Hash, Plus, Send, Loader2, AtSign, SmilePlus, Search, X } from "lucide-react";
+import { Hash, Plus, Send, Loader2, AtSign, SmilePlus, Search, X, WifiOff } from "lucide-react";
 import { formatDistanceToNow, format } from "date-fns";
+import { useToast } from "@/hooks/use-toast";
 import type { Channel, Message, User, MessageReaction } from "@shared/schema";
 
 // Common reaction emojis
@@ -85,6 +86,7 @@ type SafeUser = Omit<User, "password">;
 export default function ChatPage() {
   const { user } = useAuth();
   const ws = useWS();
+  const { toast } = useToast();
   const [activeChannel, setActiveChannel] = useState<number | null>(null);
   const [messageText, setMessageText] = useState("");
   const [typingUsers, setTypingUsers] = useState<Map<number, string>>(
@@ -247,15 +249,23 @@ export default function ChatPage() {
 
   const sendMessage = useCallback(() => {
     if (!messageText.trim() || !activeChannel) return;
-    ws.send("chat:message", {
+    const sent = ws.send("chat:message", {
       channelId: activeChannel,
       content: messageText.trim(),
     });
+    if (!sent) {
+      toast({
+        title: "Message not sent",
+        description: "Connection lost. Reconnecting — please try again in a moment.",
+        variant: "destructive",
+      });
+      return; // Keep the message text so the user can retry
+    }
     setMessageText("");
     setMentionQuery(null);
     setHighlightMsgId(null);
     deepLinkActive.current = false; // re-enable auto-scroll after user interacts
-  }, [messageText, activeChannel, ws]);
+  }, [messageText, activeChannel, ws, toast]);
 
   const toggleReaction = useCallback((messageId: number, emoji: string) => {
     ws.send("chat:reaction", { messageId, emoji });
@@ -524,6 +534,14 @@ export default function ChatPage() {
                 )}
               </div>
             )}
+          </div>
+        )}
+
+        {/* Connection lost banner */}
+        {!ws.isConnected && (
+          <div className="px-4 py-2 bg-destructive/10 border-b border-destructive/20 flex items-center gap-2">
+            <WifiOff className="h-3.5 w-3.5 text-destructive" />
+            <span className="text-xs text-destructive font-medium">Connection lost. Reconnecting...</span>
           </div>
         )}
 
