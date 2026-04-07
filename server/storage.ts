@@ -8,6 +8,7 @@ import {
   type Announcement, type InsertAnnouncement, announcements,
   type Milestone, type InsertMilestone, milestones,
   type Notification, type InsertNotification, notifications,
+  type CalendarEvent, type InsertCalendarEvent, calendarEvents,
 } from "@shared/schema";
 import { drizzle } from "drizzle-orm/better-sqlite3";
 import Database from "better-sqlite3";
@@ -81,6 +82,14 @@ export interface IStorage {
   createNotification(n: InsertNotification): Notification;
   markNotificationRead(id: number): Notification | undefined;
   markAllRead(userId: number): void;
+
+  // Calendar Events
+  getAllCalendarEvents(): CalendarEvent[];
+  getCalendarEventsByUser(userId: number): CalendarEvent[];
+  getCalendarEvent(id: number): CalendarEvent | undefined;
+  createCalendarEvent(event: InsertCalendarEvent): CalendarEvent;
+  updateCalendarEvent(id: number, data: Partial<InsertCalendarEvent>): CalendarEvent | undefined;
+  deleteCalendarEvent(id: number): void;
 
   // Auth helpers
   verifyPassword(plain: string, hash: string): boolean;
@@ -228,6 +237,26 @@ export class DatabaseStorage implements IStorage {
     db.update(notifications).set({ read: 1 }).where(and(eq(notifications.userId, userId), eq(notifications.read, 0))).run();
   }
 
+  // ── Calendar Events ──
+  getAllCalendarEvents(): CalendarEvent[] {
+    return db.select().from(calendarEvents).orderBy(asc(calendarEvents.startDate)).all();
+  }
+  getCalendarEventsByUser(userId: number): CalendarEvent[] {
+    return db.select().from(calendarEvents).where(eq(calendarEvents.userId, userId)).orderBy(asc(calendarEvents.startDate)).all();
+  }
+  getCalendarEvent(id: number): CalendarEvent | undefined {
+    return db.select().from(calendarEvents).where(eq(calendarEvents.id, id)).get();
+  }
+  createCalendarEvent(data: InsertCalendarEvent): CalendarEvent {
+    return db.insert(calendarEvents).values({ ...data, createdAt: now() }).returning().get();
+  }
+  updateCalendarEvent(id: number, data: Partial<InsertCalendarEvent>): CalendarEvent | undefined {
+    return db.update(calendarEvents).set(data).where(eq(calendarEvents.id, id)).returning().get();
+  }
+  deleteCalendarEvent(id: number): void {
+    db.delete(calendarEvents).where(eq(calendarEvents.id, id)).run();
+  }
+
   // ── Auth ──
   hashPassword(plain: string): string {
     return hashSync(plain, 10);
@@ -307,6 +336,19 @@ export class DatabaseStorage implements IStorage {
         status TEXT NOT NULL DEFAULT 'pending',
         target_date TEXT,
         sort_order INTEGER NOT NULL DEFAULT 0,
+        created_at TEXT NOT NULL DEFAULT ''
+      );
+      CREATE TABLE IF NOT EXISTS calendar_events (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        title TEXT NOT NULL,
+        description TEXT NOT NULL DEFAULT '',
+        user_id INTEGER NOT NULL,
+        start_date TEXT NOT NULL,
+        end_date TEXT NOT NULL,
+        all_day INTEGER NOT NULL DEFAULT 0,
+        type TEXT NOT NULL DEFAULT 'meeting',
+        color TEXT NOT NULL DEFAULT '#4F6BED',
+        attendees TEXT NOT NULL DEFAULT '[]',
         created_at TEXT NOT NULL DEFAULT ''
       );
       CREATE TABLE IF NOT EXISTS notifications (

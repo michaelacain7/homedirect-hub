@@ -5,7 +5,7 @@ import { storage } from "./storage";
 import {
   insertUserSchema, insertChannelSchema, insertMessageSchema,
   insertTaskSchema, insertTodoSchema, insertAnnouncementSchema,
-  insertMilestoneSchema, insertNotificationSchema,
+  insertMilestoneSchema, insertNotificationSchema, insertCalendarEventSchema,
 } from "@shared/schema";
 import session from "express-session";
 import MemoryStore from "memorystore";
@@ -398,6 +398,76 @@ export async function registerRoutes(
     });
     return notif;
   }
+
+  // ── Calendar Event Routes ─────────────────
+  app.get("/api/calendar-events", requireAuth, (_req, res) => {
+    const allEvents = storage.getAllCalendarEvents();
+    const allUsers = storage.getAllUsers();
+    const userMap = new Map(allUsers.map(u => [u.id, safeUser(u)]));
+    res.json(allEvents.map(e => ({
+      ...e,
+      user: userMap.get(e.userId),
+      attendeeUsers: (JSON.parse(e.attendees) as number[]).map(id => userMap.get(id)).filter(Boolean),
+    })));
+  });
+
+  app.get("/api/calendar-events/user/:userId", requireAuth, (req, res) => {
+    const userId = Number(req.params.userId);
+    const userEvents = storage.getCalendarEventsByUser(userId);
+    // Also include events where this user is an attendee
+    const allEvents = storage.getAllCalendarEvents();
+    const attendeeEvents = allEvents.filter(e =>
+      e.userId !== userId && (JSON.parse(e.attendees) as number[]).includes(userId)
+    );
+    const combined = [...userEvents, ...attendeeEvents];
+    // Deduplicate by id
+    const seen = new Set<number>();
+    const unique = combined.filter(e => {
+      if (seen.has(e.id)) return false;
+      seen.add(e.id);
+      return true;
+    });
+    const allUsers = storage.getAllUsers();
+    const userMap = new Map(allUsers.map(u => [u.id, safeUser(u)]));
+    res.json(unique.map(e => ({
+      ...e,
+      user: userMap.get(e.userId),
+      attendeeUsers: (JSON.parse(e.attendees) as number[]).map(id => userMap.get(id)).filter(Boolean),
+    })));
+  });
+
+  app.post("/api/calendar-events", requireAuth, (req, res) => {
+    const user = req.user as any;
+    const event = storage.createCalendarEvent({ ...req.body, userId: user.id });
+    broadcastAll("calendar:created", event);
+    // Notify attendees
+    const attendeeIds = JSON.parse(event.attendees || "[]") as number[];
+    for (const attendeeId of attendeeIds) {
+      if (attendeeId !== user.id) {
+        notifyUser(
+          attendeeId,
+          "calendar_event",
+          "New Calendar Event",
+          `${user.displayName} invited you to: "${event.title}"`,
+          "/calendar"
+        );
+      }
+    }
+    res.json(event);
+  });
+
+  app.put("/api/calendar-events/:id", requireAuth, (req, res) => {
+    const updated = storage.updateCalendarEvent(Number(req.params.id), req.body);
+    if (!updated) return res.status(404).json({ message: "Event not found" });
+    broadcastAll("calendar:updated", updated);
+    res.json(updated);
+  });
+
+  app.delete("/api/calendar-events/:id", requireAuth, (req, res) => {
+    storage.deleteCalendarEvent(Number(req.params.id));
+    broadcastAll("calendar:deleted", { id: Number(req.params.id) });
+    res.json({ ok: true });
+  });
 
   // ── Dashboard Stats ──────────────────────────────
   app.get("/api/dashboard/stats", requireAuth, (_req, res) => {

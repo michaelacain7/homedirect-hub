@@ -24,6 +24,7 @@ import {
   CheckCheck,
   MessageCircle,
   ListTodo,
+  CalendarDays,
 } from "lucide-react";
 
 // ── Notification Bell Component ──────────────────
@@ -210,6 +211,7 @@ const navItems = [
   { href: "/chat", label: "Chat", icon: MessageSquare },
   { href: "/tasks", label: "Tasks", icon: KanbanSquare },
   { href: "/todos", label: "My To-Do", icon: CheckSquare },
+  { href: "/calendar", label: "Calendar", icon: CalendarDays },
   { href: "/files", label: "Files", icon: FolderOpen },
   { href: "/team", label: "Team", icon: Users },
 ];

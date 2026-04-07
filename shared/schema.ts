@@ -161,3 +161,25 @@ export const insertNotificationSchema = createInsertSchema(notifications).omit({
 });
 export type InsertNotification = z.infer<typeof insertNotificationSchema>;
 export type Notification = typeof notifications.$inferSelect;
+
+// ── Calendar Events ───────────────────────────────
+export const calendarEvents = sqliteTable("calendar_events", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  title: text("title").notNull(),
+  description: text("description").notNull().default(""),
+  userId: integer("user_id").notNull(), // creator
+  startDate: text("start_date").notNull(), // ISO string
+  endDate: text("end_date").notNull(), // ISO string
+  allDay: integer("all_day").notNull().default(0),
+  type: text("type").notNull().default("meeting"), // meeting | task | deadline | reminder | other
+  color: text("color").notNull().default("#4F6BED"),
+  attendees: text("attendees").notNull().default("[]"), // JSON array of user IDs
+  createdAt: text("created_at").notNull().default(""),
+});
+
+export const insertCalendarEventSchema = createInsertSchema(calendarEvents).omit({
+  id: true,
+  createdAt: true,
+});
+export type InsertCalendarEvent = z.infer<typeof insertCalendarEventSchema>;
+export type CalendarEvent = typeof calendarEvents.$inferSelect;

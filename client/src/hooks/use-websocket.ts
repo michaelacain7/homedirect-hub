@@ -74,6 +74,16 @@ export function useWebSocket(userId: number | null) {
             queryClient.invalidateQueries({ queryKey: ["/api/notifications"] });
             queryClient.invalidateQueries({ queryKey: ["/api/notifications/unread-count"] });
             break;
+          case "calendar:created":
+          case "calendar:updated":
+          case "calendar:deleted":
+            queryClient.invalidateQueries({ queryKey: ["/api/calendar-events"] });
+            // Also invalidate per-user calendar queries
+            queryClient.invalidateQueries({ predicate: (q) => {
+              const key = q.queryKey;
+              return Array.isArray(key) && key[0] === "/api/calendar-events/user";
+            }});
+            break;
         }
       } catch {
         // ignore non-JSON messages

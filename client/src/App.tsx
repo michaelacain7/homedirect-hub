@@ -13,6 +13,7 @@ import TasksPage from "@/pages/tasks";
 import TodosPage from "@/pages/todos";
 import FilesPage from "@/pages/files";
 import TeamPage from "@/pages/team";
+import CalendarPage from "@/pages/calendar";
 import NotFound from "@/pages/not-found";
 import { Loader2 } from "lucide-react";
 
@@ -39,6 +40,7 @@ function AppRouter() {
         <Route path="/tasks" component={TasksPage} />
         <Route path="/todos" component={TodosPage} />
         <Route path="/files" component={FilesPage} />
+        <Route path="/calendar" component={CalendarPage} />
         <Route path="/team" component={TeamPage} />
         <Route component={NotFound} />
       </Switch>
