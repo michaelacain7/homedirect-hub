@@ -92,6 +92,8 @@ function NotificationBell() {
     switch (type) {
       case "chat_message":
         return <MessageCircle className="h-3.5 w-3.5 text-blue-400" />;
+      case "chat_mention":
+        return <MessageCircle className="h-3.5 w-3.5 text-orange-400" />;
       case "task_assigned":
         return <ListTodo className="h-3.5 w-3.5 text-amber-400" />;
       default:

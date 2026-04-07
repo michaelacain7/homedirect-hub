@@ -528,21 +528,45 @@ export async function registerRoutes(
               user: user ? safeUser(user) : null,
             }, msg.data.channelId);
 
-            // Notify all other team members about the new chat message
             if (user) {
               const channel = storage.getChannel(msg.data.channelId);
               const channelName = channel?.name || "chat";
               const preview = msg.data.content.length > 80 ? msg.data.content.slice(0, 80) + "..." : msg.data.content;
               const allUsers = storage.getAllUsers();
+
+              // Detect @mentions by matching against known display names
+              const contentLower = msg.data.content.toLowerCase();
+              const mentionedUserIds = new Set<number>();
+              for (const u of allUsers) {
+                const pattern = "@" + u.displayName.toLowerCase();
+                if (contentLower.includes(pattern)) {
+                  mentionedUserIds.add(u.id);
+                }
+              }
+
+              const messageLink = `/chat?channel=${msg.data.channelId}&msgId=${saved.id}`;
+
               for (const u of allUsers) {
                 if (u.id !== client.userId) {
-                  notifyUser(
-                    u.id,
-                    "chat_message",
-                    `#${channelName}`,
-                    `${user.displayName}: ${preview}`,
-                    "/chat"
-                  );
+                  if (mentionedUserIds.has(u.id)) {
+                    // Tagged mention — higher priority notification
+                    notifyUser(
+                      u.id,
+                      "chat_mention",
+                      `Mentioned in #${channelName}`,
+                      `${user.displayName} tagged you: ${preview}`,
+                      messageLink
+                    );
+                  } else {
+                    // Regular chat notification
+                    notifyUser(
+                      u.id,
+                      "chat_message",
+                      `#${channelName}`,
+                      `${user.displayName}: ${preview}`,
+                      "/chat"
+                    );
+                  }
                 }
               }
             }
