@@ -297,6 +297,24 @@ export async function registerRoutes(
     res.json({ ok: true });
   });
 
+  // ── File Folder Routes ──────────────────────────
+  app.get("/api/file-folders", requireAuth, (_req, res) => {
+    res.json(storage.getAllFileFolders());
+  });
+  app.post("/api/file-folders", requireAuth, (req, res) => {
+    const user = req.user as any;
+    const folder = storage.createFileFolder({ ...req.body, createdBy: user.id });
+    res.json(folder);
+  });
+  app.put("/api/file-folders/:id", requireAuth, (req, res) => {
+    const folder = storage.updateFileFolder(Number(req.params.id), req.body);
+    res.json(folder);
+  });
+  app.delete("/api/file-folders/:id", requireAuth, (req, res) => {
+    storage.deleteFileFolder(Number(req.params.id));
+    res.json({ ok: true });
+  });
+
   // ── File Routes ──────────────────────────────────
   app.get("/api/files", requireAuth, (_req, res) => {
     const allFiles = storage.getAllFiles();
@@ -312,8 +330,10 @@ export async function registerRoutes(
     const user = req.user as any;
     const file = req.file;
     if (!file) return res.status(400).json({ message: "No file uploaded" });
+    const folderId = req.body?.folderId ? Number(req.body.folderId) : null;
     const record = storage.createFile({
       userId: user.id,
+      folderId,
       originalName: file.originalname,
       storedName: file.filename,
       size: file.size,
@@ -331,6 +351,12 @@ export async function registerRoutes(
     res.setHeader("Content-Disposition", `attachment; filename="${file.originalName}"`);
     res.setHeader("Content-Type", file.mimeType);
     fs.createReadStream(filePath).pipe(res);
+  });
+
+  app.put("/api/files/:id/move", requireAuth, (req, res) => {
+    const folderId = req.body.folderId ?? null;
+    const file = storage.moveFileToFolder(Number(req.params.id), folderId);
+    res.json(file);
   });
 
   app.delete("/api/files/:id", requireAuth, (req, res) => {

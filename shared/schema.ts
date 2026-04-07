@@ -90,10 +90,23 @@ export const insertTodoSchema = createInsertSchema(todos).omit({
 export type InsertTodo = z.infer<typeof insertTodoSchema>;
 export type Todo = typeof todos.$inferSelect;
 
+// ── File Folders ──────────────────────────────────
+export const fileFolders = sqliteTable("file_folders", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  name: text("name").notNull(),
+  color: text("color").notNull().default("#6366f1"),
+  createdBy: integer("created_by").notNull(),
+});
+
+export const insertFileFolderSchema = createInsertSchema(fileFolders).omit({ id: true });
+export type InsertFileFolder = z.infer<typeof insertFileFolderSchema>;
+export type FileFolder = typeof fileFolders.$inferSelect;
+
 // ── Files (Shared) ────────────────────────────────
 export const files = sqliteTable("files", {
   id: integer("id").primaryKey({ autoIncrement: true }),
   userId: integer("user_id").notNull(),
+  folderId: integer("folder_id"),
   originalName: text("original_name").notNull(),
   storedName: text("stored_name").notNull(),
   size: integer("size").notNull(),

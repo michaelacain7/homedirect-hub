@@ -4,6 +4,7 @@ import {
   type Message, type InsertMessage, messages,
   type Task, type InsertTask, tasks,
   type Todo, type InsertTodo, todos,
+  type FileFolder, type InsertFileFolder, fileFolders,
   type FileRecord, type InsertFile, files,
   type Announcement, type InsertAnnouncement, announcements,
   type Milestone, type InsertMilestone, milestones,
@@ -61,10 +62,17 @@ export interface IStorage {
   updateTodo(id: number, data: Partial<InsertTodo>): Todo | undefined;
   deleteTodo(id: number): void;
 
+  // File Folders
+  getAllFileFolders(): FileFolder[];
+  createFileFolder(f: InsertFileFolder): FileFolder;
+  updateFileFolder(id: number, data: Partial<InsertFileFolder>): FileFolder | undefined;
+  deleteFileFolder(id: number): void;
+
   // Files
   getAllFiles(): FileRecord[];
   getFile(id: number): FileRecord | undefined;
   createFile(file: InsertFile): FileRecord;
+  moveFileToFolder(fileId: number, folderId: number | null): FileRecord | undefined;
   deleteFile(id: number): void;
 
   // Announcements
@@ -194,6 +202,22 @@ export class DatabaseStorage implements IStorage {
     db.delete(todos).where(eq(todos.id, id)).run();
   }
 
+  // ── File Folders ──
+  getAllFileFolders(): FileFolder[] {
+    return db.select().from(fileFolders).orderBy(fileFolders.name).all();
+  }
+  createFileFolder(data: InsertFileFolder): FileFolder {
+    return db.insert(fileFolders).values(data).returning().get();
+  }
+  updateFileFolder(id: number, data: Partial<InsertFileFolder>): FileFolder | undefined {
+    return db.update(fileFolders).set(data).where(eq(fileFolders.id, id)).returning().get();
+  }
+  deleteFileFolder(id: number): void {
+    // Move files in this folder to uncategorized
+    db.update(files).set({ folderId: null }).where(eq(files.folderId, id)).run();
+    db.delete(fileFolders).where(eq(fileFolders.id, id)).run();
+  }
+
   // ── Files ──
   getAllFiles(): FileRecord[] {
     return db.select().from(files).orderBy(desc(files.id)).all();
@@ -203,6 +227,9 @@ export class DatabaseStorage implements IStorage {
   }
   createFile(data: InsertFile): FileRecord {
     return db.insert(files).values({ ...data, createdAt: now() }).returning().get();
+  }
+  moveFileToFolder(fileId: number, folderId: number | null): FileRecord | undefined {
+    return db.update(files).set({ folderId }).where(eq(files.id, fileId)).returning().get();
   }
   deleteFile(id: number): void {
     db.delete(files).where(eq(files.id, id)).run();
@@ -425,6 +452,12 @@ export class DatabaseStorage implements IStorage {
         read INTEGER NOT NULL DEFAULT 0,
         created_at TEXT NOT NULL DEFAULT ''
       );
+      CREATE TABLE IF NOT EXISTS file_folders (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL,
+        color TEXT NOT NULL DEFAULT '#6366f1',
+        created_by INTEGER NOT NULL
+      );
       CREATE TABLE IF NOT EXISTS message_reactions (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         message_id INTEGER NOT NULL,
@@ -433,6 +466,9 @@ export class DatabaseStorage implements IStorage {
         UNIQUE(message_id, user_id, emoji)
       );
     `);
+
+    // Add folder_id column to files if missing (migration for existing DBs)
+    try { sqlite.exec(`ALTER TABLE files ADD COLUMN folder_id INTEGER`); } catch {}
 
     // Seed only if no users exist
     const existingUser = db.select().from(users).get();
