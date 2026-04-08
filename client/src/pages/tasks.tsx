@@ -21,13 +21,15 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Plus, Loader2, Trash2, Calendar, Search, X } from "lucide-react";
+import { Plus, Loader2, Trash2, Calendar, Search, X, Check } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
 import { useToast } from "@/hooks/use-toast";
 import type { Task, User } from "@shared/schema";
 
+type SafeUser = { id: number; displayName: string; avatarColor: string };
+
 type TaskWithUsers = Task & {
-  assignedUser?: { id: number; displayName: string; avatarColor: string } | null;
+  assignedUsers?: SafeUser[];
   createdByUser?: { id: number; displayName: string } | null;
 };
 
@@ -94,7 +96,7 @@ export default function TasksPage() {
   const [formPriority, setFormPriority] = useState("medium");
   const [formCategory, setFormCategory] = useState("general");
   const [formPhase, setFormPhase] = useState("phase-1");
-  const [formAssignee, setFormAssignee] = useState("");
+  const [formAssignees, setFormAssignees] = useState<number[]>([]);
   const [formDueDate, setFormDueDate] = useState("");
 
   const { data: tasks, isLoading } = useQuery<TaskWithUsers[]>({
@@ -149,7 +151,7 @@ export default function TasksPage() {
     setFormPriority("medium");
     setFormCategory("general");
     setFormPhase("phase-1");
-    setFormAssignee("");
+    setFormAssignees([]);
     setFormDueDate("");
   }
 
@@ -161,7 +163,8 @@ export default function TasksPage() {
     setFormPriority(task.priority);
     setFormCategory(task.category);
     setFormPhase(task.phase || "phase-1");
-    setFormAssignee(task.assignedTo?.toString() || "");
+    const ids: number[] = (() => { try { return JSON.parse(task.assignedTo as string); } catch { return []; } })();
+    setFormAssignees(ids);
     setFormDueDate(task.dueDate || "");
   }
 
@@ -172,7 +175,10 @@ export default function TasksPage() {
       const matchDesc = (t.description || "").toLowerCase().includes(q);
       if (!matchTitle && !matchDesc) return false;
     }
-    if (filterAssignee !== "all" && t.assignedTo?.toString() !== filterAssignee) return false;
+    if (filterAssignee !== "all") {
+      const ids: number[] = (() => { try { return JSON.parse(t.assignedTo as string); } catch { return []; } })();
+      if (!ids.includes(Number(filterAssignee))) return false;
+    }
     if (filterPriority !== "all" && t.priority !== filterPriority) return false;
     if (filterCategory !== "all" && t.category !== filterCategory) return false;
     if (filterStatus !== "all" && t.status !== filterStatus) return false;
@@ -363,19 +369,29 @@ export default function TasksPage() {
                           </Badge>
                         </div>
                         <div className="flex items-center justify-between">
-                          {task.assignedUser ? (
-                            <div className="flex items-center gap-1.5">
-                              <div
-                                className="h-5 w-5 rounded-full flex items-center justify-center text-[8px] font-semibold text-white"
-                                style={{
-                                  backgroundColor:
-                                    task.assignedUser.avatarColor,
-                                }}
-                              >
-                                {getInitials(task.assignedUser.displayName)}
+                          {task.assignedUsers && task.assignedUsers.length > 0 ? (
+                            <div className="flex items-center gap-1">
+                              <div className="flex -space-x-1.5">
+                                {task.assignedUsers.slice(0, 3).map((u) => (
+                                  <div
+                                    key={u.id}
+                                    className="h-5 w-5 rounded-full flex items-center justify-center text-[8px] font-semibold text-white ring-1 ring-background"
+                                    style={{ backgroundColor: u.avatarColor }}
+                                    title={u.displayName}
+                                  >
+                                    {getInitials(u.displayName)}
+                                  </div>
+                                ))}
+                                {task.assignedUsers.length > 3 && (
+                                  <div className="h-5 w-5 rounded-full flex items-center justify-center text-[8px] font-semibold bg-muted text-muted-foreground ring-1 ring-background">
+                                    +{task.assignedUsers.length - 3}
+                                  </div>
+                                )}
                               </div>
-                              <span className="text-[11px] text-muted-foreground">
-                                {task.assignedUser.displayName}
+                              <span className="text-[11px] text-muted-foreground truncate max-w-[80px]">
+                                {task.assignedUsers.length === 1
+                                  ? task.assignedUsers[0].displayName
+                                  : `${task.assignedUsers.length} people`}
                               </span>
                             </div>
                           ) : (
@@ -429,7 +445,7 @@ export default function TasksPage() {
                 priority: formPriority,
                 category: formCategory,
                 phase: formPhase,
-                assignedTo: formAssignee ? parseInt(formAssignee) : null,
+                assignedTo: JSON.stringify(formAssignees),
                 dueDate: formDueDate || null,
                 createdBy: user!.id,
               };
@@ -481,7 +497,7 @@ export default function TasksPage() {
                 </SelectContent>
               </Select>
             </div>
-            <div className="grid grid-cols-3 gap-3">
+            <div className="grid grid-cols-2 gap-3">
               <Select value={formCategory} onValueChange={setFormCategory}>
                 <SelectTrigger data-testid="select-task-category">
                   <SelectValue />
@@ -505,24 +521,49 @@ export default function TasksPage() {
                   <SelectItem value="phase-3">Phase 3</SelectItem>
                 </SelectContent>
               </Select>
-              <Select
-                value={formAssignee || "unassigned"}
-                onValueChange={(v) =>
-                  setFormAssignee(v === "unassigned" ? "" : v)
-                }
-              >
-                <SelectTrigger data-testid="select-task-assignee">
-                  <SelectValue placeholder="Assign to..." />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="unassigned">Unassigned</SelectItem>
-                  {team?.map((m) => (
-                    <SelectItem key={m.id} value={m.id.toString()}>
+            </div>
+            <div>
+              <label className="text-sm font-medium mb-1.5 block">
+                Assign to
+                {formAssignees.length > 0 && (
+                  <span className="ml-1 text-muted-foreground font-normal">
+                    ({formAssignees.length} selected)
+                  </span>
+                )}
+              </label>
+              <div className="flex flex-wrap gap-1.5">
+                {team?.map((m: any) => {
+                  const selected = formAssignees.includes(m.id);
+                  return (
+                    <button
+                      key={m.id}
+                      type="button"
+                      onClick={() =>
+                        setFormAssignees((prev) =>
+                          prev.includes(m.id)
+                            ? prev.filter((id) => id !== m.id)
+                            : [...prev, m.id]
+                        )
+                      }
+                      className={`flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium border transition-colors ${
+                        selected
+                          ? "bg-primary text-primary-foreground border-primary"
+                          : "bg-background text-muted-foreground border-border hover:border-primary/50"
+                      }`}
+                      data-testid={`assignee-toggle-${m.id}`}
+                    >
+                      <div
+                        className="h-4 w-4 rounded-full flex items-center justify-center text-[7px] text-white shrink-0"
+                        style={{ backgroundColor: m.avatarColor }}
+                      >
+                        {getInitials(m.displayName)}
+                      </div>
                       {m.displayName}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+                      {selected && <Check className="h-3 w-3 ml-0.5" />}
+                    </button>
+                  );
+                })}
+              </div>
             </div>
             <Input
               type="date"

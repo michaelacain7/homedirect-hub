@@ -415,7 +415,7 @@ export class DatabaseStorage implements IStorage {
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         title TEXT NOT NULL,
         description TEXT NOT NULL DEFAULT '',
-        assigned_to INTEGER,
+        assigned_to TEXT NOT NULL DEFAULT '[]',
         created_by INTEGER NOT NULL,
         status TEXT NOT NULL DEFAULT 'todo',
         priority TEXT NOT NULL DEFAULT 'medium',
@@ -518,6 +518,19 @@ export class DatabaseStorage implements IStorage {
 
     // Add phase column to tasks if missing (migration for existing DBs)
     try { sqlite.exec(`ALTER TABLE tasks ADD COLUMN phase TEXT NOT NULL DEFAULT 'phase-1'`); } catch {}
+
+    // Migrate tasks assigned_to from integer to JSON array (for existing DBs)
+    try {
+      const rows = sqlite.prepare(`SELECT id, assigned_to FROM tasks WHERE assigned_to IS NOT NULL AND assigned_to != '[]' AND assigned_to NOT LIKE '[%'`).all() as any[];
+      for (const row of rows) {
+        const val = Number(row.assigned_to);
+        if (!isNaN(val) && val > 0) {
+          sqlite.prepare(`UPDATE tasks SET assigned_to = ? WHERE id = ?`).run(JSON.stringify([val]), row.id);
+        }
+      }
+      // Convert NULL values to empty arrays
+      sqlite.prepare(`UPDATE tasks SET assigned_to = '[]' WHERE assigned_to IS NULL`).run();
+    } catch {}
 
     // Migrate meeting_requests: recipient_id -> recipient_ids + responses (for existing DBs)
     try { sqlite.exec(`ALTER TABLE meeting_requests ADD COLUMN recipient_ids TEXT NOT NULL DEFAULT '[]'`); } catch {}

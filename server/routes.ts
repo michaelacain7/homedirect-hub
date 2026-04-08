@@ -230,28 +230,25 @@ export async function registerRoutes(
     const allTasks = storage.getAllTasks();
     const allUsers = storage.getAllUsers();
     const userMap = new Map(allUsers.map(u => [u.id, safeUser(u)]));
-    res.json(allTasks.map(t => ({
-      ...t,
-      assignedUser: t.assignedTo ? userMap.get(t.assignedTo) : null,
-      createdByUser: userMap.get(t.createdBy),
-    })));
+    res.json(allTasks.map(t => {
+      const assignedIds: number[] = (() => { try { return JSON.parse(t.assignedTo as string); } catch { return []; } })();
+      return {
+        ...t,
+        assignedUsers: assignedIds.map(id => userMap.get(id)).filter(Boolean),
+        createdByUser: userMap.get(t.createdBy),
+      };
+    }));
   });
 
   app.post("/api/tasks", requireAuth, (req, res) => {
     const user = req.user as any;
     const task = storage.createTask({ ...req.body, createdBy: user.id });
     broadcastAll("task:created", task);
-    // Notify assigned user
-    if (task.assignedTo && task.assignedTo !== user.id) {
-      const assignedUser = storage.getUser(task.assignedTo);
-      if (assignedUser) {
-        notifyUser(
-          task.assignedTo,
-          "task_assigned",
-          "New Task Assigned",
-          `${user.displayName} assigned you: "${task.title}"`,
-          "/tasks"
-        );
+    // Notify assigned users
+    const assignedIds: number[] = (() => { try { return JSON.parse(task.assignedTo as string); } catch { return []; } })();
+    for (const uid of assignedIds) {
+      if (uid !== user.id) {
+        notifyUser(uid, "task_assigned", "New Task Assigned", `${user.displayName} assigned you: "${task.title}"`, "/tasks");
       }
     }
     res.json(task);
@@ -263,15 +260,13 @@ export async function registerRoutes(
     const updated = storage.updateTask(Number(req.params.id), req.body);
     if (!updated) return res.status(404).json({ message: "Task not found" });
     broadcastAll("task:updated", updated);
-    // Notify if assignment changed
-    if (req.body.assignedTo && req.body.assignedTo !== oldTask?.assignedTo && req.body.assignedTo !== user.id) {
-      notifyUser(
-        req.body.assignedTo,
-        "task_assigned",
-        "Task Assigned to You",
-        `${user.displayName} assigned you: "${updated.title}"`,
-        "/tasks"
-      );
+    // Notify newly assigned users
+    const oldIds: number[] = (() => { try { return JSON.parse(oldTask?.assignedTo as string || "[]"); } catch { return []; } })();
+    const newIds: number[] = (() => { try { return JSON.parse(req.body.assignedTo || "[]"); } catch { return []; } })();
+    for (const uid of newIds) {
+      if (!oldIds.includes(uid) && uid !== user.id) {
+        notifyUser(uid, "task_assigned", "Task Assigned to You", `${user.displayName} assigned you: "${updated.title}"`, "/tasks");
+      }
     }
     res.json(updated);
   });

@@ -58,7 +58,7 @@ export const tasks = sqliteTable("tasks", {
   id: integer("id").primaryKey({ autoIncrement: true }),
   title: text("title").notNull(),
   description: text("description").notNull().default(""),
-  assignedTo: integer("assigned_to"),
+  assignedTo: text("assigned_to").notNull().default("[]"), // JSON array of user IDs
   createdBy: integer("created_by").notNull(),
   status: text("status").notNull().default("todo"), // todo | in-progress | review | done
   priority: text("priority").notNull().default("medium"), // low | medium | high | urgent
