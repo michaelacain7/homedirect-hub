@@ -19,12 +19,12 @@ import {
   Send,
   Inbox,
   Trash2,
-  User as UserIcon,
+  Users,
 } from "lucide-react";
 
 interface MeetingRequestWithUsers extends MeetingRequest {
   requester?: Partial<User>;
-  recipient?: Partial<User>;
+  recipientUsers?: Partial<User>[];
 }
 
 function toLocalDatetimeStr(date: Date) {
@@ -63,10 +63,17 @@ function timeAgo(dateStr: string) {
 }
 
 const STATUS_CONFIG: Record<string, { label: string; color: string; bg: string }> = {
-  pending: { label: "Pending", color: "text-amber-600", bg: "bg-amber-50 border-amber-200" },
-  accepted: { label: "Accepted", color: "text-green-600", bg: "bg-green-50 border-green-200" },
-  declined: { label: "Declined", color: "text-red-600", bg: "bg-red-50 border-red-200" },
-  new_time_proposed: { label: "New Time Proposed", color: "text-blue-600", bg: "bg-blue-50 border-blue-200" },
+  pending: { label: "Pending", color: "text-amber-600", bg: "bg-amber-50 border-amber-200 dark:bg-amber-950/20 dark:border-amber-800" },
+  accepted: { label: "Accepted", color: "text-green-600", bg: "bg-green-50 border-green-200 dark:bg-green-950/20 dark:border-green-800" },
+  declined: { label: "Declined", color: "text-red-600", bg: "bg-red-50 border-red-200 dark:bg-red-950/20 dark:border-red-800" },
+  new_time_proposed: { label: "New Time Proposed", color: "text-blue-600", bg: "bg-blue-50 border-blue-200 dark:bg-blue-950/20 dark:border-blue-800" },
+};
+
+const RESPONSE_ICONS: Record<string, { icon: string; color: string }> = {
+  pending: { icon: "...", color: "text-amber-500" },
+  accepted: { icon: "\u2713", color: "text-green-600" },
+  declined: { icon: "\u2717", color: "text-red-600" },
+  new_time_proposed: { icon: "\u21BB", color: "text-blue-600" },
 };
 
 export default function MeetingsPage() {
@@ -85,10 +92,13 @@ export default function MeetingsPage() {
     queryKey: ["/api/team"],
   });
 
-  const inbox = requests.filter((r) => r.recipientId === user?.id);
+  // Inbox: requests where I'm a recipient
+  const inbox = requests.filter((r) => {
+    const ids: number[] = JSON.parse(r.recipientIds || "[]");
+    return ids.includes(user?.id ?? 0);
+  });
+  // Sent: requests where I'm the requester
   const sent = requests.filter((r) => r.requesterId === user?.id);
-  // For new_time_proposed, show in inbox of the person who DIDN'T propose the new time
-  // The status change means the other party needs to respond
   const displayedRequests = tab === "inbox" ? inbox : sent;
 
   const acceptMutation = useMutation({
@@ -155,9 +165,12 @@ export default function MeetingsPage() {
     },
   });
 
-  const pendingInbox = inbox.filter(
-    (r) => r.status === "pending" || r.status === "new_time_proposed"
-  ).length;
+  // Count pending inbox items where MY response is still pending or new_time_proposed
+  const pendingInbox = inbox.filter((r) => {
+    const responses: Record<string, string> = JSON.parse(r.responses || "{}");
+    const myResponse = responses[String(user?.id)];
+    return myResponse === "pending" || myResponse === "new_time_proposed" || r.status === "new_time_proposed";
+  }).length;
 
   return (
     <div className="p-4 md:p-6 space-y-4 max-w-4xl" data-testid="page-meetings">
@@ -215,144 +228,21 @@ export default function MeetingsPage() {
         </div>
       ) : (
         <div className="space-y-3">
-          {displayedRequests.map((req) => {
-            const status = STATUS_CONFIG[req.status] || STATUS_CONFIG.pending;
-            const otherUser = tab === "inbox" ? req.requester : req.recipient;
-            const canRespond =
-              tab === "inbox" &&
-              (req.status === "pending" || req.status === "new_time_proposed");
-            // For sent requests with new_time_proposed, the requester can accept the new time
-            const canAcceptNewTime =
-              tab === "sent" && req.status === "new_time_proposed";
-
-            return (
-              <div
-                key={req.id}
-                className={`border rounded-lg p-4 transition-colors ${status.bg}`}
-                data-testid={`meeting-request-${req.id}`}
-              >
-                <div className="flex items-start justify-between gap-3">
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2 mb-1">
-                      <h3 className="font-semibold text-sm truncate">{req.title}</h3>
-                      <Badge
-                        variant="outline"
-                        className={`text-[10px] ${status.color} shrink-0`}
-                      >
-                        {status.label}
-                      </Badge>
-                    </div>
-
-                    <div className="flex items-center gap-1.5 text-xs text-muted-foreground mb-1">
-                      <UserIcon className="h-3 w-3" />
-                      {tab === "inbox" ? "From" : "To"}: {otherUser?.displayName || "Unknown"}
-                    </div>
-
-                    {req.description && (
-                      <p className="text-xs text-muted-foreground mb-2">
-                        {req.description}
-                      </p>
-                    )}
-
-                    <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                      <Clock className="h-3 w-3" />
-                      {formatDateTime(req.proposedStartDate, req.allDay)} &mdash;{" "}
-                      {formatDateTime(req.proposedEndDate, req.allDay)}
-                    </div>
-
-                    {req.status === "new_time_proposed" &&
-                      req.proposedNewStartDate &&
-                      req.proposedNewEndDate && (
-                        <div className="mt-2 pl-3 border-l-2 border-blue-300">
-                          <p className="text-xs font-medium text-blue-600 mb-0.5">
-                            New Proposed Time:
-                          </p>
-                          <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                            <Clock className="h-3 w-3" />
-                            {formatDateTime(req.proposedNewStartDate, req.allDay)}{" "}
-                            &mdash;{" "}
-                            {formatDateTime(req.proposedNewEndDate, req.allDay)}
-                          </div>
-                          {req.responseMessage && (
-                            <p className="text-xs text-muted-foreground mt-1 italic">
-                              "{req.responseMessage}"
-                            </p>
-                          )}
-                        </div>
-                      )}
-
-                    {req.status === "declined" && req.responseMessage && (
-                      <p className="text-xs text-red-600 mt-1 italic">
-                        "{req.responseMessage}"
-                      </p>
-                    )}
-
-                    <p className="text-[10px] text-muted-foreground/60 mt-2">
-                      {timeAgo(req.createdAt)}
-                    </p>
-                  </div>
-
-                  {/* Actions */}
-                  <div className="flex flex-col gap-1.5 shrink-0">
-                    {canRespond && (
-                      <>
-                        <Button
-                          size="sm"
-                          className="h-7 text-xs"
-                          onClick={() => acceptMutation.mutate(req.id)}
-                          disabled={acceptMutation.isPending}
-                        >
-                          <Check className="h-3 w-3 mr-1" />
-                          Accept
-                        </Button>
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          className="h-7 text-xs"
-                          onClick={() => setProposeTimeDialog(req)}
-                        >
-                          <RefreshCw className="h-3 w-3 mr-1" />
-                          New Time
-                        </Button>
-                        <Button
-                          size="sm"
-                          variant="destructive"
-                          className="h-7 text-xs"
-                          onClick={() => setDeclineDialog(req)}
-                        >
-                          <X className="h-3 w-3 mr-1" />
-                          Decline
-                        </Button>
-                      </>
-                    )}
-                    {canAcceptNewTime && (
-                      <Button
-                        size="sm"
-                        className="h-7 text-xs"
-                        onClick={() => acceptMutation.mutate(req.id)}
-                        disabled={acceptMutation.isPending}
-                      >
-                        <Check className="h-3 w-3 mr-1" />
-                        Accept New Time
-                      </Button>
-                    )}
-                    {tab === "sent" && req.status === "pending" && (
-                      <Button
-                        size="sm"
-                        variant="destructive"
-                        className="h-7 text-xs"
-                        onClick={() => deleteMutation.mutate(req.id)}
-                        disabled={deleteMutation.isPending}
-                      >
-                        <Trash2 className="h-3 w-3 mr-1" />
-                        Cancel
-                      </Button>
-                    )}
-                  </div>
-                </div>
-              </div>
-            );
-          })}
+          {displayedRequests.map((req) => (
+            <MeetingCard
+              key={req.id}
+              request={req}
+              tab={tab}
+              currentUserId={user?.id ?? 0}
+              teamMembers={teamMembers}
+              onAccept={(id) => acceptMutation.mutate(id)}
+              onDecline={(r) => setDeclineDialog(r)}
+              onProposeTime={(r) => setProposeTimeDialog(r)}
+              onCancel={(id) => deleteMutation.mutate(id)}
+              isAccepting={acceptMutation.isPending}
+              isCancelling={deleteMutation.isPending}
+            />
+          ))}
         </div>
       )}
 
@@ -395,6 +285,230 @@ export default function MeetingsPage() {
   );
 }
 
+// ── Meeting Request Card ─────────────────────────
+function MeetingCard({
+  request: req,
+  tab,
+  currentUserId,
+  teamMembers,
+  onAccept,
+  onDecline,
+  onProposeTime,
+  onCancel,
+  isAccepting,
+  isCancelling,
+}: {
+  request: MeetingRequestWithUsers;
+  tab: "inbox" | "sent";
+  currentUserId: number;
+  teamMembers: any[];
+  onAccept: (id: number) => void;
+  onDecline: (r: MeetingRequestWithUsers) => void;
+  onProposeTime: (r: MeetingRequestWithUsers) => void;
+  onCancel: (id: number) => void;
+  isAccepting: boolean;
+  isCancelling: boolean;
+}) {
+  const responses: Record<string, string> = JSON.parse(req.responses || "{}");
+  const myResponse = responses[String(currentUserId)];
+  const status = STATUS_CONFIG[req.status] || STATUS_CONFIG.pending;
+  const recipientUsers = req.recipientUsers || [];
+  const userMap = new Map(teamMembers.map((m: any) => [m.id, m]));
+
+  // Can I respond? Only if I'm a recipient and my response is still pending
+  // or the whole meeting has a new time proposed and I haven't accepted yet
+  const canRespond =
+    tab === "inbox" &&
+    (myResponse === "pending" || req.status === "new_time_proposed") &&
+    myResponse !== "accepted";
+
+  // For sent requests with new_time_proposed, requester can accept
+  const canAcceptNewTime =
+    tab === "sent" && req.status === "new_time_proposed";
+
+  return (
+    <div
+      className={`border rounded-lg p-4 transition-colors ${status.bg}`}
+      data-testid={`meeting-request-${req.id}`}
+    >
+      <div className="flex items-start justify-between gap-3">
+        <div className="flex-1 min-w-0">
+          {/* Title + status */}
+          <div className="flex items-center gap-2 mb-1">
+            <h3 className="font-semibold text-sm truncate">{req.title}</h3>
+            <Badge
+              variant="outline"
+              className={`text-[10px] ${status.color} shrink-0`}
+            >
+              {status.label}
+            </Badge>
+          </div>
+
+          {/* From / To */}
+          <div className="flex items-center gap-1.5 text-xs text-muted-foreground mb-1">
+            {tab === "inbox" ? (
+              <>
+                <Users className="h-3 w-3" />
+                From: {req.requester?.displayName || "Unknown"}
+              </>
+            ) : (
+              <>
+                <Users className="h-3 w-3" />
+                To: {recipientUsers.map(u => u.displayName).join(", ") || "Unknown"}
+              </>
+            )}
+          </div>
+
+          {req.description && (
+            <p className="text-xs text-muted-foreground mb-2">
+              {req.description}
+            </p>
+          )}
+
+          {/* Time */}
+          <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+            <Clock className="h-3 w-3" />
+            {formatDateTime(req.proposedStartDate, req.allDay)} &mdash;{" "}
+            {formatDateTime(req.proposedEndDate, req.allDay)}
+          </div>
+
+          {/* New proposed time */}
+          {req.status === "new_time_proposed" &&
+            req.proposedNewStartDate &&
+            req.proposedNewEndDate && (
+              <div className="mt-2 pl-3 border-l-2 border-blue-300">
+                <p className="text-xs font-medium text-blue-600 mb-0.5">
+                  New Proposed Time:
+                </p>
+                <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                  <Clock className="h-3 w-3" />
+                  {formatDateTime(req.proposedNewStartDate, req.allDay)}{" "}
+                  &mdash;{" "}
+                  {formatDateTime(req.proposedNewEndDate, req.allDay)}
+                </div>
+                {req.responseMessage && (
+                  <p className="text-xs text-muted-foreground mt-1 italic">
+                    "{req.responseMessage}"
+                  </p>
+                )}
+              </div>
+            )}
+
+          {req.status === "declined" && req.responseMessage && (
+            <p className="text-xs text-red-600 mt-1 italic">
+              "{req.responseMessage}"
+            </p>
+          )}
+
+          {/* Per-person response status */}
+          {Object.keys(responses).length > 0 && (
+            <div className="mt-3 flex flex-wrap gap-1.5">
+              {Object.entries(responses).map(([uid, resp]) => {
+                const u = userMap.get(Number(uid));
+                const ri = RESPONSE_ICONS[resp] || RESPONSE_ICONS.pending;
+                return (
+                  <div
+                    key={uid}
+                    className="flex items-center gap-1 px-2 py-0.5 rounded-full bg-background/60 border border-border text-[11px]"
+                    title={`${u?.displayName || "User"}: ${resp}`}
+                  >
+                    <div
+                      className="h-4 w-4 rounded-full flex items-center justify-center text-[8px] text-white shrink-0"
+                      style={{ backgroundColor: u?.avatarColor || "#999" }}
+                    >
+                      {u?.displayName
+                        ?.split(" ")
+                        .map((w: string) => w[0])
+                        .join("")
+                        .slice(0, 2) || "?"}
+                    </div>
+                    <span className="text-muted-foreground truncate max-w-[80px]">
+                      {u?.displayName?.split(" ")[0] || "User"}
+                    </span>
+                    <span className={`font-bold ${ri.color}`}>{ri.icon}</span>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
+          <p className="text-[10px] text-muted-foreground/60 mt-2">
+            {timeAgo(req.createdAt)}
+          </p>
+        </div>
+
+        {/* Actions */}
+        <div className="flex flex-col gap-1.5 shrink-0">
+          {canRespond && (
+            <>
+              <Button
+                size="sm"
+                className="h-7 text-xs"
+                onClick={() => onAccept(req.id)}
+                disabled={isAccepting}
+              >
+                <Check className="h-3 w-3 mr-1" />
+                Accept
+              </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                className="h-7 text-xs"
+                onClick={() => onProposeTime(req)}
+              >
+                <RefreshCw className="h-3 w-3 mr-1" />
+                New Time
+              </Button>
+              <Button
+                size="sm"
+                variant="destructive"
+                className="h-7 text-xs"
+                onClick={() => onDecline(req)}
+              >
+                <X className="h-3 w-3 mr-1" />
+                Decline
+              </Button>
+            </>
+          )}
+          {canAcceptNewTime && (
+            <Button
+              size="sm"
+              className="h-7 text-xs"
+              onClick={() => onAccept(req.id)}
+              disabled={isAccepting}
+            >
+              <Check className="h-3 w-3 mr-1" />
+              Accept New Time
+            </Button>
+          )}
+          {tab === "sent" && req.status === "pending" && (
+            <Button
+              size="sm"
+              variant="destructive"
+              className="h-7 text-xs"
+              onClick={() => onCancel(req.id)}
+              disabled={isCancelling}
+            >
+              <Trash2 className="h-3 w-3 mr-1" />
+              Cancel
+            </Button>
+          )}
+          {tab === "inbox" && myResponse === "accepted" && (
+            <Badge variant="outline" className="text-[10px] text-green-600">
+              You accepted
+            </Badge>
+          )}
+          {tab === "inbox" && myResponse === "declined" && (
+            <Badge variant="outline" className="text-[10px] text-red-600">
+              You declined
+            </Badge>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ── Create Meeting Request Dialog ────────────────
 function CreateMeetingDialog({
   open,
@@ -411,7 +525,7 @@ function CreateMeetingDialog({
   onSubmit: (data: any) => void;
   isPending: boolean;
 }) {
-  const [recipientId, setRecipientId] = useState<number | null>(null);
+  const [selectedIds, setSelectedIds] = useState<number[]>([]);
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
   const [allDay, setAllDay] = useState(false);
@@ -422,11 +536,17 @@ function CreateMeetingDialog({
   const [startDate, setStartDate] = useState(toLocalDatetimeStr(defaultStart));
   const [endDate, setEndDate] = useState(toLocalDatetimeStr(defaultEnd));
 
+  function toggleRecipient(id: number) {
+    setSelectedIds((prev) =>
+      prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]
+    );
+  }
+
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    if (!recipientId || !title.trim()) return;
+    if (!selectedIds.length || !title.trim()) return;
     onSubmit({
-      recipientId,
+      recipientIds: selectedIds,
       title: title.trim(),
       description: description.trim(),
       proposedStartDate: new Date(startDate).toISOString(),
@@ -444,19 +564,24 @@ function CreateMeetingDialog({
           <DialogTitle>Request a Meeting</DialogTitle>
         </DialogHeader>
         <form onSubmit={handleSubmit} className="space-y-4">
-          {/* Recipient */}
+          {/* Recipients (multi-select) */}
           <div>
             <label className="text-sm font-medium mb-2 block">
-              Meet with
+              Invite members
+              {selectedIds.length > 0 && (
+                <span className="ml-2 text-muted-foreground font-normal">
+                  ({selectedIds.length} selected)
+                </span>
+              )}
             </label>
             <div className="flex flex-wrap gap-2">
               {others.map((m: any) => {
-                const selected = recipientId === m.id;
+                const selected = selectedIds.includes(m.id);
                 return (
                   <button
                     key={m.id}
                     type="button"
-                    onClick={() => setRecipientId(m.id)}
+                    onClick={() => toggleRecipient(m.id)}
                     className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium border transition-colors ${
                       selected
                         ? "bg-primary text-primary-foreground border-primary"
@@ -474,6 +599,7 @@ function CreateMeetingDialog({
                         .slice(0, 2)}
                     </div>
                     {m.displayName}
+                    {selected && <Check className="h-3 w-3 ml-0.5" />}
                   </button>
                 );
               })}
@@ -544,9 +670,9 @@ function CreateMeetingDialog({
             </Button>
             <Button
               type="submit"
-              disabled={isPending || !recipientId || !title.trim()}
+              disabled={isPending || !selectedIds.length || !title.trim()}
             >
-              {isPending ? "Sending..." : "Send Request"}
+              {isPending ? "Sending..." : `Send to ${selectedIds.length || ""} member${selectedIds.length !== 1 ? "s" : ""}`}
             </Button>
           </div>
         </form>

@@ -526,6 +526,18 @@ export async function registerRoutes(
   });
 
   // ── Meeting Request Routes ───────────────────────
+
+  // Helper to compute overall status from per-user responses
+  function computeMeetingStatus(responses: Record<string, string>): string {
+    const vals = Object.values(responses);
+    if (vals.length === 0) return "pending";
+    if (vals.some(v => v === "new_time_proposed")) return "new_time_proposed";
+    if (vals.every(v => v === "accepted")) return "accepted";
+    if (vals.every(v => v === "declined")) return "declined";
+    if (vals.some(v => v === "pending")) return "pending";
+    return "pending"; // mixed accepted/declined with none pending
+  }
+
   app.get("/api/meeting-requests", requireAuth, (req, res) => {
     const user = req.user as any;
     const requests = storage.getMeetingRequestsByUser(user.id);
@@ -534,48 +546,56 @@ export async function registerRoutes(
     res.json(requests.map((r: any) => ({
       ...r,
       requester: userMap.get(r.requesterId),
-      recipient: userMap.get(r.recipientId),
+      recipientUsers: (JSON.parse(r.recipientIds || "[]") as number[]).map(id => userMap.get(id)).filter(Boolean),
     })));
   });
 
   app.post("/api/meeting-requests", requireAuth, (req, res) => {
     const user = req.user as any;
-    const { recipientId, title, description, proposedStartDate, proposedEndDate, allDay } = req.body;
-    if (!recipientId || !title || !proposedStartDate || !proposedEndDate) {
+    const { recipientIds, title, description, proposedStartDate, proposedEndDate, allDay } = req.body;
+    const ids: number[] = Array.isArray(recipientIds) ? recipientIds : [];
+    if (!ids.length || !title || !proposedStartDate || !proposedEndDate) {
       return res.status(400).json({ message: "Missing required fields" });
     }
+    // Build initial responses: all pending
+    const responses: Record<string, string> = {};
+    for (const id of ids) responses[String(id)] = "pending";
+
     const request = storage.createMeetingRequest({
       requesterId: user.id,
-      recipientId,
+      recipientIds: JSON.stringify(ids),
       title,
       description: description || "",
       proposedStartDate,
       proposedEndDate,
       allDay: allDay || 0,
       status: "pending",
+      responses: JSON.stringify(responses),
       responseMessage: "",
     });
     broadcastAll("meeting-request:created", request);
-    // In-app notification
-    notifyUser(
-      recipientId,
-      "meeting_request",
-      "Meeting Request",
-      `${user.displayName} wants to meet: "${title}"`,
-      "/meetings"
-    );
-    // Email notification
-    const recipient = storage.getUser(recipientId);
-    if (recipient?.email) {
-      sendMeetingRequestEmail(
-        recipient.email,
-        user.displayName,
-        title,
-        description || "",
-        proposedStartDate,
-        proposedEndDate,
-        !!allDay,
+
+    // Notify + email each recipient
+    for (const recipientId of ids) {
+      notifyUser(
+        recipientId,
+        "meeting_request",
+        "Meeting Request",
+        `${user.displayName} wants to meet: "${title}"`,
+        "/meetings"
       );
+      const recipient = storage.getUser(recipientId);
+      if (recipient?.email) {
+        sendMeetingRequestEmail(
+          recipient.email,
+          user.displayName,
+          title,
+          description || "",
+          proposedStartDate,
+          proposedEndDate,
+          !!allDay,
+        );
+      }
     }
     res.json(request);
   });
@@ -584,57 +604,70 @@ export async function registerRoutes(
     const user = req.user as any;
     const request = storage.getMeetingRequest(Number(req.params.id));
     if (!request) return res.status(404).json({ message: "Request not found" });
-    if (request.recipientId !== user.id && request.requesterId !== user.id) {
+    const recipientIds: number[] = JSON.parse(request.recipientIds || "[]");
+    if (!recipientIds.includes(user.id) && request.requesterId !== user.id) {
       return res.status(403).json({ message: "Not authorized" });
     }
 
-    // Determine the final times - use proposed new times if this was a counter-proposal being accepted
-    const startDate = request.status === "new_time_proposed" && request.proposedNewStartDate
-      ? request.proposedNewStartDate : request.proposedStartDate;
-    const endDate = request.status === "new_time_proposed" && request.proposedNewEndDate
-      ? request.proposedNewEndDate : request.proposedEndDate;
+    // Update this user's response
+    const responses: Record<string, string> = JSON.parse(request.responses || "{}");
+    responses[String(user.id)] = "accepted";
+    const overallStatus = computeMeetingStatus(responses);
 
-    // Create a calendar event
-    const calendarEvent = storage.createCalendarEvent({
-      title: request.title,
-      description: request.description,
-      userId: request.requesterId,
-      startDate,
-      endDate,
-      allDay: request.allDay,
-      type: "meeting",
-      color: "#4F6BED",
-      attendees: JSON.stringify([request.requesterId, request.recipientId]),
-    });
-    broadcastAll("calendar:created", calendarEvent);
+    // Determine final times
+    const startDate = request.proposedNewStartDate || request.proposedStartDate;
+    const endDate = request.proposedNewEndDate || request.proposedEndDate;
 
-    // Update meeting request
+    let calendarEventId = request.calendarEventId;
+
+    // Create/update calendar event when all have accepted, or update attendees
+    const acceptedIds = Object.entries(responses).filter(([, v]) => v === "accepted").map(([k]) => Number(k));
+    const allAttendees = [request.requesterId, ...acceptedIds];
+
+    if (!calendarEventId) {
+      // Create calendar event on first acceptance
+      const calendarEvent = storage.createCalendarEvent({
+        title: request.title,
+        description: request.description,
+        userId: request.requesterId,
+        startDate,
+        endDate,
+        allDay: request.allDay,
+        type: "meeting",
+        color: "#4F6BED",
+        attendees: JSON.stringify(allAttendees),
+      });
+      broadcastAll("calendar:created", calendarEvent);
+      calendarEventId = calendarEvent.id;
+    } else {
+      // Update attendees on existing calendar event
+      storage.updateCalendarEvent(calendarEventId, {
+        attendees: JSON.stringify(allAttendees),
+      });
+      broadcastAll("calendar:updated", { id: calendarEventId });
+    }
+
     const updated = storage.updateMeetingRequest(request.id, {
-      status: "accepted",
-      calendarEventId: calendarEvent.id,
+      status: overallStatus,
+      responses: JSON.stringify(responses),
+      calendarEventId,
     });
     broadcastAll("meeting-request:updated", updated);
 
-    // Notify the other party
-    const otherUserId = user.id === request.recipientId ? request.requesterId : request.recipientId;
-    notifyUser(
-      otherUserId,
-      "meeting_accepted",
-      "Meeting Accepted",
-      `${user.displayName} accepted the meeting: "${request.title}"`,
-      "/calendar"
-    );
-    // Email
-    const otherUser = storage.getUser(otherUserId);
-    if (otherUser?.email) {
-      sendMeetingAcceptedEmail(
-        otherUser.email,
-        user.displayName,
-        request.title,
-        startDate,
-        endDate,
-        !!request.allDay,
+    // Notify requester and other recipients
+    const notifyIds = [request.requesterId, ...recipientIds].filter(id => id !== user.id);
+    for (const id of notifyIds) {
+      notifyUser(
+        id,
+        "meeting_accepted",
+        "Meeting Accepted",
+        `${user.displayName} accepted the meeting: "${request.title}"`,
+        "/calendar"
       );
+      const u = storage.getUser(id);
+      if (u?.email) {
+        sendMeetingAcceptedEmail(u.email, user.displayName, request.title, startDate, endDate, !!request.allDay);
+      }
     }
     res.json(updated);
   });
@@ -643,32 +676,33 @@ export async function registerRoutes(
     const user = req.user as any;
     const request = storage.getMeetingRequest(Number(req.params.id));
     if (!request) return res.status(404).json({ message: "Request not found" });
-    if (request.recipientId !== user.id && request.requesterId !== user.id) {
+    const recipientIds: number[] = JSON.parse(request.recipientIds || "[]");
+    if (!recipientIds.includes(user.id) && request.requesterId !== user.id) {
       return res.status(403).json({ message: "Not authorized" });
     }
 
+    const responses: Record<string, string> = JSON.parse(request.responses || "{}");
+    responses[String(user.id)] = "declined";
+    const overallStatus = computeMeetingStatus(responses);
+
     const updated = storage.updateMeetingRequest(request.id, {
-      status: "declined",
+      status: overallStatus,
+      responses: JSON.stringify(responses),
       responseMessage: req.body.message || "",
     });
     broadcastAll("meeting-request:updated", updated);
 
-    const otherUserId = user.id === request.recipientId ? request.requesterId : request.recipientId;
+    // Notify requester
     notifyUser(
-      otherUserId,
+      request.requesterId,
       "meeting_declined",
       "Meeting Declined",
       `${user.displayName} declined the meeting: "${request.title}"`,
       "/meetings"
     );
-    const otherUser = storage.getUser(otherUserId);
-    if (otherUser?.email) {
-      sendMeetingDeclinedEmail(
-        otherUser.email,
-        user.displayName,
-        request.title,
-        req.body.message,
-      );
+    const requester = storage.getUser(request.requesterId);
+    if (requester?.email) {
+      sendMeetingDeclinedEmail(requester.email, user.displayName, request.title, req.body.message);
     }
     res.json(updated);
   });
@@ -677,7 +711,8 @@ export async function registerRoutes(
     const user = req.user as any;
     const request = storage.getMeetingRequest(Number(req.params.id));
     if (!request) return res.status(404).json({ message: "Request not found" });
-    if (request.recipientId !== user.id && request.requesterId !== user.id) {
+    const recipientIds: number[] = JSON.parse(request.recipientIds || "[]");
+    if (!recipientIds.includes(user.id) && request.requesterId !== user.id) {
       return res.status(403).json({ message: "Not authorized" });
     }
     const { proposedNewStartDate, proposedNewEndDate, message } = req.body;
@@ -685,33 +720,35 @@ export async function registerRoutes(
       return res.status(400).json({ message: "New times are required" });
     }
 
+    // Mark this user's response and reset others to pending
+    const responses: Record<string, string> = JSON.parse(request.responses || "{}");
+    for (const key of Object.keys(responses)) {
+      responses[key] = key === String(user.id) ? "new_time_proposed" : "pending";
+    }
+
     const updated = storage.updateMeetingRequest(request.id, {
       status: "new_time_proposed",
+      responses: JSON.stringify(responses),
       proposedNewStartDate,
       proposedNewEndDate,
       responseMessage: message || "",
     });
     broadcastAll("meeting-request:updated", updated);
 
-    const otherUserId = user.id === request.recipientId ? request.requesterId : request.recipientId;
-    notifyUser(
-      otherUserId,
-      "meeting_new_time",
-      "New Time Proposed",
-      `${user.displayName} proposed a new time for: "${request.title}"`,
-      "/meetings"
-    );
-    const otherUser = storage.getUser(otherUserId);
-    if (otherUser?.email) {
-      sendMeetingNewTimeEmail(
-        otherUser.email,
-        user.displayName,
-        request.title,
-        proposedNewStartDate,
-        proposedNewEndDate,
-        !!request.allDay,
-        message,
+    // Notify all other parties
+    const notifyIds = [request.requesterId, ...recipientIds].filter(id => id !== user.id);
+    for (const id of notifyIds) {
+      notifyUser(
+        id,
+        "meeting_new_time",
+        "New Time Proposed",
+        `${user.displayName} proposed a new time for: "${request.title}"`,
+        "/meetings"
       );
+      const u = storage.getUser(id);
+      if (u?.email) {
+        sendMeetingNewTimeEmail(u.email, user.displayName, request.title, proposedNewStartDate, proposedNewEndDate, !!request.allDay, message);
+      }
     }
     res.json(updated);
   });

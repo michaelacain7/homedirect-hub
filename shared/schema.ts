@@ -215,13 +215,14 @@ export type CalendarEvent = typeof calendarEvents.$inferSelect;
 export const meetingRequests = sqliteTable("meeting_requests", {
   id: integer("id").primaryKey({ autoIncrement: true }),
   requesterId: integer("requester_id").notNull(),
-  recipientId: integer("recipient_id").notNull(),
+  recipientIds: text("recipient_ids").notNull().default("[]"), // JSON array of user IDs
   title: text("title").notNull(),
   description: text("description").notNull().default(""),
   proposedStartDate: text("proposed_start_date").notNull(),
   proposedEndDate: text("proposed_end_date").notNull(),
   allDay: integer("all_day").notNull().default(0),
   status: text("status").notNull().default("pending"), // pending | accepted | declined | new_time_proposed
+  responses: text("responses").notNull().default("{}"), // JSON: { "userId": "pending"|"accepted"|"declined"|"new_time_proposed" }
   responseMessage: text("response_message").notNull().default(""),
   proposedNewStartDate: text("proposed_new_start_date"),
   proposedNewEndDate: text("proposed_new_end_date"),

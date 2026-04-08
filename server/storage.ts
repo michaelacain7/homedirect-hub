@@ -358,8 +358,9 @@ export class DatabaseStorage implements IStorage {
 
   // ── Meeting Requests ──
   getMeetingRequestsByUser(userId: number): MeetingRequest[] {
-    const sql = `SELECT * FROM meeting_requests WHERE requester_id = ? OR recipient_id = ? ORDER BY id DESC`;
-    return sqlite.prepare(sql).all(userId, userId) as MeetingRequest[];
+    const idStr = `"${userId}"`;
+    const sql = `SELECT * FROM meeting_requests WHERE requester_id = ? OR recipient_ids LIKE ? ORDER BY id DESC`;
+    return sqlite.prepare(sql).all(userId, `%${idStr}%`) as MeetingRequest[];
   }
   getMeetingRequest(id: number): MeetingRequest | undefined {
     return db.select().from(meetingRequests).where(eq(meetingRequests.id, id)).get();
@@ -494,13 +495,14 @@ export class DatabaseStorage implements IStorage {
       CREATE TABLE IF NOT EXISTS meeting_requests (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         requester_id INTEGER NOT NULL,
-        recipient_id INTEGER NOT NULL,
+        recipient_ids TEXT NOT NULL DEFAULT '[]',
         title TEXT NOT NULL,
         description TEXT NOT NULL DEFAULT '',
         proposed_start_date TEXT NOT NULL,
         proposed_end_date TEXT NOT NULL,
         all_day INTEGER NOT NULL DEFAULT 0,
         status TEXT NOT NULL DEFAULT 'pending',
+        responses TEXT NOT NULL DEFAULT '{}',
         response_message TEXT NOT NULL DEFAULT '',
         proposed_new_start_date TEXT,
         proposed_new_end_date TEXT,
@@ -512,6 +514,18 @@ export class DatabaseStorage implements IStorage {
 
     // Add folder_id column to files if missing (migration for existing DBs)
     try { sqlite.exec(`ALTER TABLE files ADD COLUMN folder_id INTEGER`); } catch {}
+
+    // Migrate meeting_requests: recipient_id -> recipient_ids + responses (for existing DBs)
+    try { sqlite.exec(`ALTER TABLE meeting_requests ADD COLUMN recipient_ids TEXT NOT NULL DEFAULT '[]'`); } catch {}
+    try { sqlite.exec(`ALTER TABLE meeting_requests ADD COLUMN responses TEXT NOT NULL DEFAULT '{}'`); } catch {}
+    // Migrate any old single-recipient rows to the new format
+    try {
+      const oldRows = sqlite.prepare(`SELECT id, recipient_id FROM meeting_requests WHERE recipient_ids = '[]' AND recipient_id IS NOT NULL`).all() as any[];
+      for (const row of oldRows) {
+        sqlite.prepare(`UPDATE meeting_requests SET recipient_ids = ?, responses = ? WHERE id = ?`)
+          .run(JSON.stringify([row.recipient_id]), JSON.stringify({ [row.recipient_id]: "pending" }), row.id);
+      }
+    } catch {}
 
     // Seed only if no users exist
     const existingUser = db.select().from(users).get();
