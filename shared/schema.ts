@@ -210,3 +210,30 @@ export const insertCalendarEventSchema = createInsertSchema(calendarEvents).omit
 });
 export type InsertCalendarEvent = z.infer<typeof insertCalendarEventSchema>;
 export type CalendarEvent = typeof calendarEvents.$inferSelect;
+
+// ── Meeting Requests ─────────────────────────────
+export const meetingRequests = sqliteTable("meeting_requests", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  requesterId: integer("requester_id").notNull(),
+  recipientId: integer("recipient_id").notNull(),
+  title: text("title").notNull(),
+  description: text("description").notNull().default(""),
+  proposedStartDate: text("proposed_start_date").notNull(),
+  proposedEndDate: text("proposed_end_date").notNull(),
+  allDay: integer("all_day").notNull().default(0),
+  status: text("status").notNull().default("pending"), // pending | accepted | declined | new_time_proposed
+  responseMessage: text("response_message").notNull().default(""),
+  proposedNewStartDate: text("proposed_new_start_date"),
+  proposedNewEndDate: text("proposed_new_end_date"),
+  calendarEventId: integer("calendar_event_id"), // set when accepted
+  createdAt: text("created_at").notNull().default(""),
+  updatedAt: text("updated_at").notNull().default(""),
+});
+
+export const insertMeetingRequestSchema = createInsertSchema(meetingRequests).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+export type InsertMeetingRequest = z.infer<typeof insertMeetingRequestSchema>;
+export type MeetingRequest = typeof meetingRequests.$inferSelect;

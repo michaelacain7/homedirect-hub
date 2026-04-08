@@ -6,7 +6,15 @@ import {
   insertUserSchema, insertChannelSchema, insertMessageSchema,
   insertTaskSchema, insertTodoSchema, insertAnnouncementSchema,
   insertMilestoneSchema, insertNotificationSchema, insertCalendarEventSchema,
+  insertMeetingRequestSchema,
 } from "@shared/schema";
+import {
+  sendMeetingRequestEmail,
+  sendMeetingAcceptedEmail,
+  sendMeetingDeclinedEmail,
+  sendMeetingNewTimeEmail,
+  sendNotificationEmail,
+} from "./email";
 import session from "express-session";
 import MemoryStore from "memorystore";
 import passport from "passport";
@@ -430,7 +438,7 @@ export async function registerRoutes(
     res.json({ ok: true });
   });
 
-  // Helper: create notification and push via WebSocket
+  // Helper: create notification and push via WebSocket + email
   function notifyUser(userId: number, type: string, title: string, body: string, linkTo?: string) {
     const notif = storage.createNotification({ userId, type, title, body, linkTo, read: 0 });
     // Push to connected WebSocket clients for this user
@@ -439,6 +447,11 @@ export async function registerRoutes(
         client.ws.send(JSON.stringify({ event: "notification:new", data: notif }));
       }
     });
+    // Also send email notification
+    const recipient = storage.getUser(userId);
+    if (recipient?.email) {
+      sendNotificationEmail(recipient.email, title, body);
+    }
     return notif;
   }
 
@@ -509,6 +522,209 @@ export async function registerRoutes(
   app.delete("/api/calendar-events/:id", requireAuth, (req, res) => {
     storage.deleteCalendarEvent(Number(req.params.id));
     broadcastAll("calendar:deleted", { id: Number(req.params.id) });
+    res.json({ ok: true });
+  });
+
+  // ── Meeting Request Routes ───────────────────────
+  app.get("/api/meeting-requests", requireAuth, (req, res) => {
+    const user = req.user as any;
+    const requests = storage.getMeetingRequestsByUser(user.id);
+    const allUsers = storage.getAllUsers();
+    const userMap = new Map(allUsers.map(u => [u.id, safeUser(u)]));
+    res.json(requests.map((r: any) => ({
+      ...r,
+      requester: userMap.get(r.requesterId),
+      recipient: userMap.get(r.recipientId),
+    })));
+  });
+
+  app.post("/api/meeting-requests", requireAuth, (req, res) => {
+    const user = req.user as any;
+    const { recipientId, title, description, proposedStartDate, proposedEndDate, allDay } = req.body;
+    if (!recipientId || !title || !proposedStartDate || !proposedEndDate) {
+      return res.status(400).json({ message: "Missing required fields" });
+    }
+    const request = storage.createMeetingRequest({
+      requesterId: user.id,
+      recipientId,
+      title,
+      description: description || "",
+      proposedStartDate,
+      proposedEndDate,
+      allDay: allDay || 0,
+      status: "pending",
+      responseMessage: "",
+    });
+    broadcastAll("meeting-request:created", request);
+    // In-app notification
+    notifyUser(
+      recipientId,
+      "meeting_request",
+      "Meeting Request",
+      `${user.displayName} wants to meet: "${title}"`,
+      "/meetings"
+    );
+    // Email notification
+    const recipient = storage.getUser(recipientId);
+    if (recipient?.email) {
+      sendMeetingRequestEmail(
+        recipient.email,
+        user.displayName,
+        title,
+        description || "",
+        proposedStartDate,
+        proposedEndDate,
+        !!allDay,
+      );
+    }
+    res.json(request);
+  });
+
+  app.put("/api/meeting-requests/:id/accept", requireAuth, (req, res) => {
+    const user = req.user as any;
+    const request = storage.getMeetingRequest(Number(req.params.id));
+    if (!request) return res.status(404).json({ message: "Request not found" });
+    if (request.recipientId !== user.id && request.requesterId !== user.id) {
+      return res.status(403).json({ message: "Not authorized" });
+    }
+
+    // Determine the final times - use proposed new times if this was a counter-proposal being accepted
+    const startDate = request.status === "new_time_proposed" && request.proposedNewStartDate
+      ? request.proposedNewStartDate : request.proposedStartDate;
+    const endDate = request.status === "new_time_proposed" && request.proposedNewEndDate
+      ? request.proposedNewEndDate : request.proposedEndDate;
+
+    // Create a calendar event
+    const calendarEvent = storage.createCalendarEvent({
+      title: request.title,
+      description: request.description,
+      userId: request.requesterId,
+      startDate,
+      endDate,
+      allDay: request.allDay,
+      type: "meeting",
+      color: "#4F6BED",
+      attendees: JSON.stringify([request.requesterId, request.recipientId]),
+    });
+    broadcastAll("calendar:created", calendarEvent);
+
+    // Update meeting request
+    const updated = storage.updateMeetingRequest(request.id, {
+      status: "accepted",
+      calendarEventId: calendarEvent.id,
+    });
+    broadcastAll("meeting-request:updated", updated);
+
+    // Notify the other party
+    const otherUserId = user.id === request.recipientId ? request.requesterId : request.recipientId;
+    notifyUser(
+      otherUserId,
+      "meeting_accepted",
+      "Meeting Accepted",
+      `${user.displayName} accepted the meeting: "${request.title}"`,
+      "/calendar"
+    );
+    // Email
+    const otherUser = storage.getUser(otherUserId);
+    if (otherUser?.email) {
+      sendMeetingAcceptedEmail(
+        otherUser.email,
+        user.displayName,
+        request.title,
+        startDate,
+        endDate,
+        !!request.allDay,
+      );
+    }
+    res.json(updated);
+  });
+
+  app.put("/api/meeting-requests/:id/decline", requireAuth, (req, res) => {
+    const user = req.user as any;
+    const request = storage.getMeetingRequest(Number(req.params.id));
+    if (!request) return res.status(404).json({ message: "Request not found" });
+    if (request.recipientId !== user.id && request.requesterId !== user.id) {
+      return res.status(403).json({ message: "Not authorized" });
+    }
+
+    const updated = storage.updateMeetingRequest(request.id, {
+      status: "declined",
+      responseMessage: req.body.message || "",
+    });
+    broadcastAll("meeting-request:updated", updated);
+
+    const otherUserId = user.id === request.recipientId ? request.requesterId : request.recipientId;
+    notifyUser(
+      otherUserId,
+      "meeting_declined",
+      "Meeting Declined",
+      `${user.displayName} declined the meeting: "${request.title}"`,
+      "/meetings"
+    );
+    const otherUser = storage.getUser(otherUserId);
+    if (otherUser?.email) {
+      sendMeetingDeclinedEmail(
+        otherUser.email,
+        user.displayName,
+        request.title,
+        req.body.message,
+      );
+    }
+    res.json(updated);
+  });
+
+  app.put("/api/meeting-requests/:id/propose-new-time", requireAuth, (req, res) => {
+    const user = req.user as any;
+    const request = storage.getMeetingRequest(Number(req.params.id));
+    if (!request) return res.status(404).json({ message: "Request not found" });
+    if (request.recipientId !== user.id && request.requesterId !== user.id) {
+      return res.status(403).json({ message: "Not authorized" });
+    }
+    const { proposedNewStartDate, proposedNewEndDate, message } = req.body;
+    if (!proposedNewStartDate || !proposedNewEndDate) {
+      return res.status(400).json({ message: "New times are required" });
+    }
+
+    const updated = storage.updateMeetingRequest(request.id, {
+      status: "new_time_proposed",
+      proposedNewStartDate,
+      proposedNewEndDate,
+      responseMessage: message || "",
+    });
+    broadcastAll("meeting-request:updated", updated);
+
+    const otherUserId = user.id === request.recipientId ? request.requesterId : request.recipientId;
+    notifyUser(
+      otherUserId,
+      "meeting_new_time",
+      "New Time Proposed",
+      `${user.displayName} proposed a new time for: "${request.title}"`,
+      "/meetings"
+    );
+    const otherUser = storage.getUser(otherUserId);
+    if (otherUser?.email) {
+      sendMeetingNewTimeEmail(
+        otherUser.email,
+        user.displayName,
+        request.title,
+        proposedNewStartDate,
+        proposedNewEndDate,
+        !!request.allDay,
+        message,
+      );
+    }
+    res.json(updated);
+  });
+
+  app.delete("/api/meeting-requests/:id", requireAuth, (req, res) => {
+    const user = req.user as any;
+    const request = storage.getMeetingRequest(Number(req.params.id));
+    if (!request) return res.status(404).json({ message: "Request not found" });
+    if (request.requesterId !== user.id) {
+      return res.status(403).json({ message: "Only the requester can cancel" });
+    }
+    storage.deleteMeetingRequest(request.id);
+    broadcastAll("meeting-request:deleted", { id: request.id });
     res.json({ ok: true });
   });
 
