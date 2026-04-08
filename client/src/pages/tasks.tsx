@@ -54,6 +54,18 @@ const categoryColors: Record<string, string> = {
   general: "bg-gray-100 text-gray-600 dark:bg-gray-800/30 dark:text-gray-400",
 };
 
+const phaseColors: Record<string, string> = {
+  "phase-1": "bg-indigo-100 text-indigo-700 dark:bg-indigo-900/30 dark:text-indigo-400",
+  "phase-2": "bg-teal-100 text-teal-700 dark:bg-teal-900/30 dark:text-teal-400",
+  "phase-3": "bg-rose-100 text-rose-700 dark:bg-rose-900/30 dark:text-rose-400",
+};
+
+const phaseLabels: Record<string, string> = {
+  "phase-1": "Phase 1",
+  "phase-2": "Phase 2",
+  "phase-3": "Phase 3",
+};
+
 function getInitials(name: string) {
   return name
     .split(" ")
@@ -73,6 +85,7 @@ export default function TasksPage() {
   const [filterPriority, setFilterPriority] = useState("all");
   const [filterCategory, setFilterCategory] = useState("all");
   const [filterStatus, setFilterStatus] = useState("all");
+  const [filterPhase, setFilterPhase] = useState("all");
 
   // Form states
   const [formTitle, setFormTitle] = useState("");
@@ -80,6 +93,7 @@ export default function TasksPage() {
   const [formStatus, setFormStatus] = useState("todo");
   const [formPriority, setFormPriority] = useState("medium");
   const [formCategory, setFormCategory] = useState("general");
+  const [formPhase, setFormPhase] = useState("phase-1");
   const [formAssignee, setFormAssignee] = useState("");
   const [formDueDate, setFormDueDate] = useState("");
 
@@ -134,6 +148,7 @@ export default function TasksPage() {
     setFormStatus("todo");
     setFormPriority("medium");
     setFormCategory("general");
+    setFormPhase("phase-1");
     setFormAssignee("");
     setFormDueDate("");
   }
@@ -145,6 +160,7 @@ export default function TasksPage() {
     setFormStatus(task.status);
     setFormPriority(task.priority);
     setFormCategory(task.category);
+    setFormPhase(task.phase || "phase-1");
     setFormAssignee(task.assignedTo?.toString() || "");
     setFormDueDate(task.dueDate || "");
   }
@@ -160,6 +176,7 @@ export default function TasksPage() {
     if (filterPriority !== "all" && t.priority !== filterPriority) return false;
     if (filterCategory !== "all" && t.category !== filterCategory) return false;
     if (filterStatus !== "all" && t.status !== filterStatus) return false;
+    if (filterPhase !== "all" && t.phase !== filterPhase) return false;
     return true;
   });
 
@@ -239,6 +256,17 @@ export default function TasksPage() {
             <SelectItem value="general">General</SelectItem>
           </SelectContent>
         </Select>
+        <Select value={filterPhase} onValueChange={setFilterPhase}>
+          <SelectTrigger className="h-8 w-28 text-xs" data-testid="filter-phase">
+            <SelectValue placeholder="Phase" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All Phases</SelectItem>
+            <SelectItem value="phase-1">Phase 1</SelectItem>
+            <SelectItem value="phase-2">Phase 2</SelectItem>
+            <SelectItem value="phase-3">Phase 3</SelectItem>
+          </SelectContent>
+        </Select>
         <Select value={filterStatus} onValueChange={setFilterStatus}>
           <SelectTrigger className="h-8 w-32 text-xs" data-testid="filter-status">
             <SelectValue placeholder="Status" />
@@ -251,7 +279,7 @@ export default function TasksPage() {
             <SelectItem value="done">Done</SelectItem>
           </SelectContent>
         </Select>
-        {(searchQuery || filterAssignee !== "all" || filterPriority !== "all" || filterCategory !== "all" || filterStatus !== "all") && (
+        {(searchQuery || filterAssignee !== "all" || filterPriority !== "all" || filterCategory !== "all" || filterPhase !== "all" || filterStatus !== "all") && (
           <Button
             variant="ghost"
             size="sm"
@@ -261,6 +289,7 @@ export default function TasksPage() {
               setFilterAssignee("all");
               setFilterPriority("all");
               setFilterCategory("all");
+              setFilterPhase("all");
               setFilterStatus("all");
             }}
             data-testid="button-clear-filters"
@@ -323,6 +352,14 @@ export default function TasksPage() {
                             }`}
                           >
                             {task.category}
+                          </Badge>
+                          <Badge
+                            variant="secondary"
+                            className={`text-[10px] ${
+                              phaseColors[task.phase] || phaseColors["phase-1"]
+                            }`}
+                          >
+                            {phaseLabels[task.phase] || "Phase 1"}
                           </Badge>
                         </div>
                         <div className="flex items-center justify-between">
@@ -391,6 +428,7 @@ export default function TasksPage() {
                 status: formStatus,
                 priority: formPriority,
                 category: formCategory,
+                phase: formPhase,
                 assignedTo: formAssignee ? parseInt(formAssignee) : null,
                 dueDate: formDueDate || null,
                 createdBy: user!.id,
@@ -443,7 +481,7 @@ export default function TasksPage() {
                 </SelectContent>
               </Select>
             </div>
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-3 gap-3">
               <Select value={formCategory} onValueChange={setFormCategory}>
                 <SelectTrigger data-testid="select-task-category">
                   <SelectValue />
@@ -455,6 +493,16 @@ export default function TasksPage() {
                   <SelectItem value="legal">Legal</SelectItem>
                   <SelectItem value="operations">Operations</SelectItem>
                   <SelectItem value="general">General</SelectItem>
+                </SelectContent>
+              </Select>
+              <Select value={formPhase} onValueChange={setFormPhase}>
+                <SelectTrigger data-testid="select-task-phase">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="phase-1">Phase 1</SelectItem>
+                  <SelectItem value="phase-2">Phase 2</SelectItem>
+                  <SelectItem value="phase-3">Phase 3</SelectItem>
                 </SelectContent>
               </Select>
               <Select

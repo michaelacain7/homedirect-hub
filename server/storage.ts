@@ -420,6 +420,7 @@ export class DatabaseStorage implements IStorage {
         status TEXT NOT NULL DEFAULT 'todo',
         priority TEXT NOT NULL DEFAULT 'medium',
         category TEXT NOT NULL DEFAULT 'general',
+        phase TEXT NOT NULL DEFAULT 'phase-1',
         due_date TEXT,
         created_at TEXT NOT NULL DEFAULT ''
       );
@@ -514,6 +515,9 @@ export class DatabaseStorage implements IStorage {
 
     // Add folder_id column to files if missing (migration for existing DBs)
     try { sqlite.exec(`ALTER TABLE files ADD COLUMN folder_id INTEGER`); } catch {}
+
+    // Add phase column to tasks if missing (migration for existing DBs)
+    try { sqlite.exec(`ALTER TABLE tasks ADD COLUMN phase TEXT NOT NULL DEFAULT 'phase-1'`); } catch {}
 
     // Migrate meeting_requests: recipient_id -> recipient_ids + responses (for existing DBs)
     try { sqlite.exec(`ALTER TABLE meeting_requests ADD COLUMN recipient_ids TEXT NOT NULL DEFAULT '[]'`); } catch {}

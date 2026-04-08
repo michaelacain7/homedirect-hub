@@ -63,6 +63,7 @@ export const tasks = sqliteTable("tasks", {
   status: text("status").notNull().default("todo"), // todo | in-progress | review | done
   priority: text("priority").notNull().default("medium"), // low | medium | high | urgent
   category: text("category").notNull().default("general"), // engineering | product | marketing | legal | operations | general
+  phase: text("phase").notNull().default("phase-1"), // phase-1 | phase-2 | phase-3
   dueDate: text("due_date"),
   createdAt: text("created_at").notNull().default(""),
 });
