@@ -14,6 +14,7 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Popover, PopoverTrigger, PopoverContent } from "@/components/ui/popover";
+import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip";
 import { Hash, Plus, Send, Loader2, AtSign, SmilePlus, Search, X, WifiOff } from "lucide-react";
 import { formatDistanceToNow, format } from "date-fns";
 import { useToast } from "@/hooks/use-toast";
@@ -614,20 +615,33 @@ export default function ChatPage() {
                       <div className="flex flex-wrap gap-1 mt-1">
                         {groupedReactions.map((rg) => {
                           const isMine = user ? rg.userIds.includes(user.id) : false;
+                          const reactorNames = rg.userIds
+                            .map((uid) => {
+                              if (uid === user?.id) return "You";
+                              const member = teamMembers.find((m) => m.id === uid);
+                              return member?.displayName || "Unknown";
+                            })
+                            .join(", ");
                           return (
-                            <button
-                              key={rg.emoji}
-                              onClick={() => toggleReaction(msg.id, rg.emoji)}
-                              className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-xs border transition-colors ${
-                                isMine
-                                  ? "bg-primary/15 border-primary/30 text-primary"
-                                  : "bg-muted/50 border-border hover:bg-muted"
-                              }`}
-                              data-testid={`reaction-${msg.id}-${rg.emoji}`}
-                            >
-                              <span>{rg.emoji}</span>
-                              <span className="font-medium">{rg.count}</span>
-                            </button>
+                            <Tooltip key={rg.emoji}>
+                              <TooltipTrigger asChild>
+                                <button
+                                  onClick={() => toggleReaction(msg.id, rg.emoji)}
+                                  className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-xs border transition-colors ${
+                                    isMine
+                                      ? "bg-primary/15 border-primary/30 text-primary"
+                                      : "bg-muted/50 border-border hover:bg-muted"
+                                  }`}
+                                  data-testid={`reaction-${msg.id}-${rg.emoji}`}
+                                >
+                                  <span>{rg.emoji}</span>
+                                  <span className="font-medium">{rg.count}</span>
+                                </button>
+                              </TooltipTrigger>
+                              <TooltipContent side="top" className="text-xs">
+                                {reactorNames}
+                              </TooltipContent>
+                            </Tooltip>
                           );
                         })}
                       </div>
