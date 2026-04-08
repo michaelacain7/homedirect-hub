@@ -25,6 +25,7 @@ import {
   MessageCircle,
   ListTodo,
   CalendarDays,
+  Handshake,
 } from "lucide-react";
 
 // ── Notification Bell Component ──────────────────
@@ -96,6 +97,11 @@ function NotificationBell() {
         return <MessageCircle className="h-3.5 w-3.5 text-orange-400" />;
       case "task_assigned":
         return <ListTodo className="h-3.5 w-3.5 text-amber-400" />;
+      case "meeting_request":
+      case "meeting_accepted":
+      case "meeting_declined":
+      case "meeting_new_time":
+        return <Handshake className="h-3.5 w-3.5 text-indigo-400" />;
       default:
         return <Bell className="h-3.5 w-3.5 text-muted-foreground" />;
     }
@@ -214,6 +220,7 @@ const navItems = [
   { href: "/tasks", label: "Tasks", icon: KanbanSquare },
   { href: "/todos", label: "My To-Do", icon: CheckSquare },
   { href: "/calendar", label: "Calendar", icon: CalendarDays },
+  { href: "/meetings", label: "Meetings", icon: Handshake },
   { href: "/files", label: "Files", icon: FolderOpen },
   { href: "/team", label: "Team", icon: Users },
 ];

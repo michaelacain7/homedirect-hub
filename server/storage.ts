@@ -11,6 +11,7 @@ import {
   type Notification, type InsertNotification, notifications,
   type MessageReaction, type InsertMessageReaction, messageReactions,
   type CalendarEvent, type InsertCalendarEvent, calendarEvents,
+  type MeetingRequest, type InsertMeetingRequest, meetingRequests,
 } from "@shared/schema";
 import { drizzle } from "drizzle-orm/better-sqlite3";
 import Database from "better-sqlite3";
@@ -109,6 +110,13 @@ export interface IStorage {
   createCalendarEvent(event: InsertCalendarEvent): CalendarEvent;
   updateCalendarEvent(id: number, data: Partial<InsertCalendarEvent>): CalendarEvent | undefined;
   deleteCalendarEvent(id: number): void;
+
+  // Meeting Requests
+  getMeetingRequestsByUser(userId: number): MeetingRequest[];
+  getMeetingRequest(id: number): MeetingRequest | undefined;
+  createMeetingRequest(data: InsertMeetingRequest): MeetingRequest;
+  updateMeetingRequest(id: number, data: Partial<InsertMeetingRequest>): MeetingRequest | undefined;
+  deleteMeetingRequest(id: number): void;
 
   // Auth helpers
   verifyPassword(plain: string, hash: string): boolean;
@@ -348,6 +356,24 @@ export class DatabaseStorage implements IStorage {
     db.delete(calendarEvents).where(eq(calendarEvents.id, id)).run();
   }
 
+  // ── Meeting Requests ──
+  getMeetingRequestsByUser(userId: number): MeetingRequest[] {
+    const sql = `SELECT * FROM meeting_requests WHERE requester_id = ? OR recipient_id = ? ORDER BY id DESC`;
+    return sqlite.prepare(sql).all(userId, userId) as MeetingRequest[];
+  }
+  getMeetingRequest(id: number): MeetingRequest | undefined {
+    return db.select().from(meetingRequests).where(eq(meetingRequests.id, id)).get();
+  }
+  createMeetingRequest(data: InsertMeetingRequest): MeetingRequest {
+    return db.insert(meetingRequests).values({ ...data, createdAt: now(), updatedAt: now() }).returning().get();
+  }
+  updateMeetingRequest(id: number, data: Partial<InsertMeetingRequest>): MeetingRequest | undefined {
+    return db.update(meetingRequests).set({ ...data, updatedAt: now() }).where(eq(meetingRequests.id, id)).returning().get();
+  }
+  deleteMeetingRequest(id: number): void {
+    db.delete(meetingRequests).where(eq(meetingRequests.id, id)).run();
+  }
+
   // ── Auth ──
   hashPassword(plain: string): string {
     return hashSync(plain, 10);
@@ -464,6 +490,23 @@ export class DatabaseStorage implements IStorage {
         user_id INTEGER NOT NULL,
         emoji TEXT NOT NULL,
         UNIQUE(message_id, user_id, emoji)
+      );
+      CREATE TABLE IF NOT EXISTS meeting_requests (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        requester_id INTEGER NOT NULL,
+        recipient_id INTEGER NOT NULL,
+        title TEXT NOT NULL,
+        description TEXT NOT NULL DEFAULT '',
+        proposed_start_date TEXT NOT NULL,
+        proposed_end_date TEXT NOT NULL,
+        all_day INTEGER NOT NULL DEFAULT 0,
+        status TEXT NOT NULL DEFAULT 'pending',
+        response_message TEXT NOT NULL DEFAULT '',
+        proposed_new_start_date TEXT,
+        proposed_new_end_date TEXT,
+        calendar_event_id INTEGER,
+        created_at TEXT NOT NULL DEFAULT '',
+        updated_at TEXT NOT NULL DEFAULT ''
       );
     `);
 
