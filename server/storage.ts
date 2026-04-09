@@ -12,6 +12,7 @@ import {
   type MessageReaction, type InsertMessageReaction, messageReactions,
   type CalendarEvent, type InsertCalendarEvent, calendarEvents,
   type MeetingRequest, type InsertMeetingRequest, meetingRequests,
+  type TaskComment, type InsertTaskComment, taskComments,
 } from "@shared/schema";
 import { drizzle } from "drizzle-orm/better-sqlite3";
 import Database from "better-sqlite3";
@@ -110,6 +111,11 @@ export interface IStorage {
   createCalendarEvent(event: InsertCalendarEvent): CalendarEvent;
   updateCalendarEvent(id: number, data: Partial<InsertCalendarEvent>): CalendarEvent | undefined;
   deleteCalendarEvent(id: number): void;
+
+  // Task Comments
+  getTaskComments(taskId: number): TaskComment[];
+  createTaskComment(data: InsertTaskComment): TaskComment;
+  deleteTaskComment(id: number): void;
 
   // Meeting Requests
   getMeetingRequestsByUser(userId: number): MeetingRequest[];
@@ -356,6 +362,17 @@ export class DatabaseStorage implements IStorage {
     db.delete(calendarEvents).where(eq(calendarEvents.id, id)).run();
   }
 
+  // ── Task Comments ──
+  getTaskComments(taskId: number): TaskComment[] {
+    return db.select().from(taskComments).where(eq(taskComments.taskId, taskId)).orderBy(asc(taskComments.id)).all();
+  }
+  createTaskComment(data: InsertTaskComment): TaskComment {
+    return db.insert(taskComments).values({ ...data, createdAt: now() }).returning().get();
+  }
+  deleteTaskComment(id: number): void {
+    db.delete(taskComments).where(eq(taskComments.id, id)).run();
+  }
+
   // ── Meeting Requests ──
   getMeetingRequestsByUser(userId: number): MeetingRequest[] {
     const idStr = `"${userId}"`;
@@ -422,6 +439,13 @@ export class DatabaseStorage implements IStorage {
         category TEXT NOT NULL DEFAULT 'general',
         phase TEXT NOT NULL DEFAULT 'phase-1',
         due_date TEXT,
+        created_at TEXT NOT NULL DEFAULT ''
+      );
+      CREATE TABLE IF NOT EXISTS task_comments (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        task_id INTEGER NOT NULL,
+        user_id INTEGER NOT NULL,
+        content TEXT NOT NULL,
         created_at TEXT NOT NULL DEFAULT ''
       );
       CREATE TABLE IF NOT EXISTS todos (

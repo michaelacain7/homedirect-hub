@@ -6,7 +6,7 @@ import {
   insertUserSchema, insertChannelSchema, insertMessageSchema,
   insertTaskSchema, insertTodoSchema, insertAnnouncementSchema,
   insertMilestoneSchema, insertNotificationSchema, insertCalendarEventSchema,
-  insertMeetingRequestSchema,
+  insertMeetingRequestSchema, insertTaskCommentSchema,
 } from "@shared/schema";
 import {
   sendMeetingRequestEmail,
@@ -274,6 +274,40 @@ export async function registerRoutes(
   app.delete("/api/tasks/:id", requireAuth, (req, res) => {
     storage.deleteTask(Number(req.params.id));
     broadcastAll("task:deleted", { id: Number(req.params.id) });
+    res.json({ ok: true });
+  });
+
+  // ── Task Comment Routes ──────────────────────────
+  app.get("/api/tasks/:taskId/comments", requireAuth, (req, res) => {
+    const comments = storage.getTaskComments(Number(req.params.taskId));
+    const allUsers = storage.getAllUsers();
+    const userMap = new Map(allUsers.map(u => [u.id, safeUser(u)]));
+    res.json(comments.map(c => ({ ...c, user: userMap.get(c.userId) })));
+  });
+
+  app.post("/api/tasks/:taskId/comments", requireAuth, (req, res) => {
+    const user = req.user as any;
+    const taskId = Number(req.params.taskId);
+    const task = storage.getTask(taskId);
+    if (!task) return res.status(404).json({ message: "Task not found" });
+    const { content } = req.body;
+    if (!content?.trim()) return res.status(400).json({ message: "Content is required" });
+    const comment = storage.createTaskComment({ taskId, userId: user.id, content: content.trim() });
+    const allUsers = storage.getAllUsers();
+    const userMap = new Map(allUsers.map(u => [u.id, safeUser(u)]));
+    const enriched = { ...comment, user: userMap.get(comment.userId) };
+    broadcastAll("task:comment", enriched);
+    // Notify assigned users (except the commenter)
+    const assignedIds: number[] = (() => { try { return JSON.parse(task.assignedTo as string); } catch { return []; } })();
+    const notifyIds = [...new Set([...assignedIds, task.createdBy])].filter(id => id !== user.id);
+    for (const uid of notifyIds) {
+      notifyUser(uid, "task_comment", "New Comment on Task", `${user.displayName} commented on "${task.title}"`, "/tasks");
+    }
+    res.json(enriched);
+  });
+
+  app.delete("/api/tasks/:taskId/comments/:commentId", requireAuth, (req, res) => {
+    storage.deleteTaskComment(Number(req.params.commentId));
     res.json({ ok: true });
   });
 

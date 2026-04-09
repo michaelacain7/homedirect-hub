@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useRef, useEffect } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { useAuth } from "@/hooks/use-auth";
 import { apiRequest, queryClient } from "@/lib/queryClient";
@@ -21,10 +21,11 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Plus, Loader2, Trash2, Calendar, Search, X, Check } from "lucide-react";
+import { Plus, Loader2, Trash2, Calendar, Search, X, Check, Send, MessageSquare } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
 import { useToast } from "@/hooks/use-toast";
-import type { Task, User } from "@shared/schema";
+import { ScrollArea } from "@/components/ui/scroll-area";
+import type { Task, User, TaskComment } from "@shared/schema";
 
 type SafeUser = { id: number; displayName: string; avatarColor: string };
 
@@ -82,6 +83,7 @@ export default function TasksPage() {
   const { toast } = useToast();
   const [selectedTask, setSelectedTask] = useState<TaskWithUsers | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
+  const [dialogTab, setDialogTab] = useState<"details" | "comments">("details");
   const [searchQuery, setSearchQuery] = useState("");
   const [filterAssignee, setFilterAssignee] = useState("all");
   const [filterPriority, setFilterPriority] = useState("all");
@@ -426,15 +428,46 @@ export default function TasksPage() {
           if (!open) {
             setCreateOpen(false);
             setSelectedTask(null);
+            setDialogTab("details");
           }
         }}
       >
-        <DialogContent className="max-w-lg">
+        <DialogContent className={selectedTask ? "max-w-2xl max-h-[90vh] overflow-hidden flex flex-col" : "max-w-lg"}>
           <DialogHeader>
             <DialogTitle>
               {selectedTask ? "Edit Task" : "New Task"}
             </DialogTitle>
           </DialogHeader>
+
+          {/* Tabs for edit mode */}
+          {selectedTask && (
+            <div className="flex rounded-lg border border-border overflow-hidden w-fit">
+              <button
+                onClick={() => setDialogTab("details")}
+                className={`px-4 py-1.5 text-xs font-medium transition-colors ${
+                  dialogTab === "details"
+                    ? "bg-primary text-primary-foreground"
+                    : "bg-background text-muted-foreground hover:text-foreground"
+                }`}
+              >
+                Details
+              </button>
+              <button
+                onClick={() => setDialogTab("comments")}
+                className={`flex items-center gap-1.5 px-4 py-1.5 text-xs font-medium transition-colors ${
+                  dialogTab === "comments"
+                    ? "bg-primary text-primary-foreground"
+                    : "bg-background text-muted-foreground hover:text-foreground"
+                }`}
+              >
+                <MessageSquare className="h-3 w-3" />
+                Comments
+              </button>
+            </div>
+          )}
+
+          {/* Details tab / Create form */}
+          {(!selectedTask || dialogTab === "details") && (
           <form
             onSubmit={(e) => {
               e.preventDefault();
@@ -596,8 +629,132 @@ export default function TasksPage() {
               )}
             </div>
           </form>
+          )}
+
+          {/* Comments tab */}
+          {selectedTask && dialogTab === "comments" && (
+            <TaskComments taskId={selectedTask.id} currentUser={user!} />
+          )}
         </DialogContent>
       </Dialog>
+    </div>
+  );
+}
+
+// ── Task Comments Component ──────────────────────
+function TaskComments({ taskId, currentUser }: { taskId: number; currentUser: any }) {
+  const [commentText, setCommentText] = useState("");
+  const messagesEndRef = useRef<HTMLDivElement>(null);
+
+  type CommentWithUser = TaskComment & { user?: any };
+
+  const { data: comments = [], isLoading } = useQuery<CommentWithUser[]>({
+    queryKey: ["/api/tasks", taskId, "comments"],
+    queryFn: async () => {
+      const res = await apiRequest("GET", `/api/tasks/${taskId}/comments`);
+      return res.json();
+    },
+  });
+
+  const addComment = useMutation({
+    mutationFn: async (content: string) => {
+      const res = await apiRequest("POST", `/api/tasks/${taskId}/comments`, { content });
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/tasks", taskId, "comments"] });
+      setCommentText("");
+    },
+  });
+
+  // Auto-scroll to bottom on new comments
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [comments]);
+
+  function handleSend() {
+    if (!commentText.trim()) return;
+    addComment.mutate(commentText.trim());
+  }
+
+  function timeAgo(dateStr: string) {
+    const diff = Date.now() - new Date(dateStr).getTime();
+    const mins = Math.floor(diff / 60000);
+    if (mins < 1) return "just now";
+    if (mins < 60) return `${mins}m ago`;
+    const hours = Math.floor(mins / 60);
+    if (hours < 24) return `${hours}h ago`;
+    return `${Math.floor(hours / 24)}d ago`;
+  }
+
+  return (
+    <div className="flex flex-col flex-1 min-h-0">
+      {/* Messages area */}
+      <ScrollArea className="flex-1 max-h-[350px]">
+        <div className="space-y-3 p-1">
+          {isLoading ? (
+            <div className="text-center py-8 text-sm text-muted-foreground">Loading...</div>
+          ) : comments.length === 0 ? (
+            <div className="text-center py-8">
+              <MessageSquare className="h-8 w-8 mx-auto mb-2 text-muted-foreground/40" />
+              <p className="text-sm text-muted-foreground">No comments yet. Start the discussion!</p>
+            </div>
+          ) : (
+            comments.map((c) => {
+              const isMe = c.userId === currentUser.id;
+              return (
+                <div key={c.id} className={`flex gap-2.5 ${isMe ? "" : ""}`}>
+                  <div
+                    className="h-7 w-7 rounded-full flex items-center justify-center text-[9px] font-semibold text-white shrink-0"
+                    style={{ backgroundColor: c.user?.avatarColor || "#4F6BED" }}
+                  >
+                    {getInitials(c.user?.displayName || "?")}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-baseline gap-2">
+                      <span className="text-xs font-semibold">
+                        {c.user?.displayName || "Unknown"}
+                      </span>
+                      <span className="text-[10px] text-muted-foreground">
+                        {timeAgo(c.createdAt)}
+                      </span>
+                    </div>
+                    <p className="text-sm text-foreground/90 whitespace-pre-wrap break-words mt-0.5">
+                      {c.content}
+                    </p>
+                  </div>
+                </div>
+              );
+            })
+          )}
+          <div ref={messagesEndRef} />
+        </div>
+      </ScrollArea>
+
+      {/* Input */}
+      <div className="flex gap-2 pt-3 border-t border-border mt-2">
+        <Input
+          placeholder="Write a comment..."
+          value={commentText}
+          onChange={(e) => setCommentText(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" && !e.shiftKey) {
+              e.preventDefault();
+              handleSend();
+            }
+          }}
+          className="flex-1"
+          data-testid="input-task-comment"
+        />
+        <Button
+          size="icon"
+          onClick={handleSend}
+          disabled={!commentText.trim() || addComment.isPending}
+          data-testid="button-send-task-comment"
+        >
+          <Send className="h-4 w-4" />
+        </Button>
+      </div>
     </div>
   );
 }
