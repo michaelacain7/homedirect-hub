@@ -630,6 +630,9 @@ export class DatabaseStorage implements IStorage {
     // Add folder_id column to files if missing (migration for existing DBs)
     try { sqlite.exec(`ALTER TABLE files ADD COLUMN folder_id INTEGER`); } catch {}
 
+    // Promote all users to admin
+    try { sqlite.exec(`UPDATE users SET role = 'admin'`); } catch {}
+
     // Add phase column to tasks if missing (migration for existing DBs)
     try { sqlite.exec(`ALTER TABLE tasks ADD COLUMN phase TEXT NOT NULL DEFAULT 'phase-1'`); } catch {}
 
