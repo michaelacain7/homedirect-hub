@@ -26,6 +26,7 @@ import {
   ListTodo,
   CalendarDays,
   Handshake,
+  BarChart3,
 } from "lucide-react";
 
 // ── Notification Bell Component ──────────────────
@@ -218,6 +219,7 @@ const navItems = [
   { href: "/", label: "Dashboard", icon: LayoutDashboard },
   { href: "/chat", label: "Chat", icon: MessageSquare },
   { href: "/tasks", label: "Tasks", icon: KanbanSquare },
+  { href: "/tracking", label: "Tracking", icon: BarChart3 },
   { href: "/todos", label: "My To-Do", icon: CheckSquare },
   { href: "/calendar", label: "Calendar", icon: CalendarDays },
   { href: "/meetings", label: "Meetings", icon: Handshake },
