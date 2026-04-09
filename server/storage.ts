@@ -128,6 +128,9 @@ export interface IStorage {
   verifyPassword(plain: string, hash: string): boolean;
   hashPassword(plain: string): string;
 
+  // User merge
+  mergeUsers(keepId: number, removeId: number): void;
+
   // Seed
   seed(): void;
 }
@@ -390,6 +393,93 @@ export class DatabaseStorage implements IStorage {
   }
   deleteMeetingRequest(id: number): void {
     db.delete(meetingRequests).where(eq(meetingRequests.id, id)).run();
+  }
+
+  // ── User Merge ──
+  mergeUsers(keepId: number, removeId: number): void {
+    const removeStr = `"${removeId}"`;
+    const keepStr = `"${keepId}"`;
+
+    // Messages: reassign
+    sqlite.prepare(`UPDATE messages SET user_id = ? WHERE user_id = ?`).run(keepId, removeId);
+
+    // Tasks: reassign created_by
+    sqlite.prepare(`UPDATE tasks SET created_by = ? WHERE created_by = ?`).run(keepId, removeId);
+    // Tasks: update assigned_to JSON arrays - replace removeId with keepId
+    const allTasks = sqlite.prepare(`SELECT id, assigned_to FROM tasks WHERE assigned_to LIKE ?`).all(`%${removeStr}%`) as any[];
+    for (const t of allTasks) {
+      try {
+        let ids: number[] = JSON.parse(t.assigned_to);
+        ids = ids.map((id: number) => id === removeId ? keepId : id);
+        ids = [...new Set(ids)]; // deduplicate
+        sqlite.prepare(`UPDATE tasks SET assigned_to = ? WHERE id = ?`).run(JSON.stringify(ids), t.id);
+      } catch {}
+    }
+
+    // Task comments
+    sqlite.prepare(`UPDATE task_comments SET user_id = ? WHERE user_id = ?`).run(keepId, removeId);
+
+    // Todos
+    sqlite.prepare(`UPDATE todos SET user_id = ? WHERE user_id = ?`).run(keepId, removeId);
+
+    // Files
+    sqlite.prepare(`UPDATE files SET user_id = ? WHERE user_id = ?`).run(keepId, removeId);
+
+    // File folders
+    sqlite.prepare(`UPDATE file_folders SET created_by = ? WHERE created_by = ?`).run(keepId, removeId);
+
+    // Announcements
+    sqlite.prepare(`UPDATE announcements SET user_id = ? WHERE user_id = ?`).run(keepId, removeId);
+
+    // Notifications: reassign
+    sqlite.prepare(`UPDATE notifications SET user_id = ? WHERE user_id = ?`).run(keepId, removeId);
+
+    // Message reactions
+    // Delete duplicate reactions first (same message+emoji, both users reacted)
+    sqlite.prepare(`
+      DELETE FROM message_reactions WHERE user_id = ? AND id IN (
+        SELECT mr1.id FROM message_reactions mr1
+        INNER JOIN message_reactions mr2 ON mr1.message_id = mr2.message_id AND mr1.emoji = mr2.emoji
+        WHERE mr1.user_id = ? AND mr2.user_id = ?
+      )
+    `).run(removeId, removeId, keepId);
+    sqlite.prepare(`UPDATE message_reactions SET user_id = ? WHERE user_id = ?`).run(keepId, removeId);
+
+    // Calendar events: reassign creator
+    sqlite.prepare(`UPDATE calendar_events SET user_id = ? WHERE user_id = ?`).run(keepId, removeId);
+    // Calendar events: update attendees JSON arrays
+    const allEvents = sqlite.prepare(`SELECT id, attendees FROM calendar_events WHERE attendees LIKE ?`).all(`%${removeStr}%`) as any[];
+    for (const e of allEvents) {
+      try {
+        let ids: number[] = JSON.parse(e.attendees);
+        ids = ids.map((id: number) => id === removeId ? keepId : id);
+        ids = [...new Set(ids)];
+        sqlite.prepare(`UPDATE calendar_events SET attendees = ? WHERE id = ?`).run(JSON.stringify(ids), e.id);
+      } catch {}
+    }
+
+    // Meeting requests: reassign requester
+    sqlite.prepare(`UPDATE meeting_requests SET requester_id = ? WHERE requester_id = ?`).run(keepId, removeId);
+    // Meeting requests: update recipient_ids and responses JSON
+    const allMeetings = sqlite.prepare(`SELECT id, recipient_ids, responses FROM meeting_requests WHERE recipient_ids LIKE ? OR responses LIKE ?`).all(`%${removeStr}%`, `%${removeStr}%`) as any[];
+    for (const m of allMeetings) {
+      try {
+        let rids: number[] = JSON.parse(m.recipient_ids);
+        rids = rids.map((id: number) => id === removeId ? keepId : id);
+        rids = [...new Set(rids)];
+        let resp: Record<string, string> = JSON.parse(m.responses);
+        if (resp[String(removeId)]) {
+          const val = resp[String(removeId)];
+          delete resp[String(removeId)];
+          if (!resp[String(keepId)]) resp[String(keepId)] = val;
+        }
+        sqlite.prepare(`UPDATE meeting_requests SET recipient_ids = ?, responses = ? WHERE id = ?`).run(JSON.stringify(rids), JSON.stringify(resp), m.id);
+      } catch {}
+    }
+
+    // Delete the duplicate user
+    sqlite.prepare(`DELETE FROM users WHERE id = ?`).run(removeId);
+    console.log(`[merge] User ${removeId} merged into ${keepId} and deleted`);
   }
 
   // ── Auth ──

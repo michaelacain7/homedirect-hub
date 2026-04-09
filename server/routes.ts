@@ -184,6 +184,23 @@ export async function registerRoutes(
     res.json(safeUser(updated));
   });
 
+  app.post("/api/team/merge", requireAuth, (req, res) => {
+    const user = req.user as any;
+    if (user.role !== "admin") return res.status(403).json({ message: "Admins only" });
+    const { keepId, removeId } = req.body;
+    if (!keepId || !removeId || keepId === removeId) {
+      return res.status(400).json({ message: "Invalid merge parameters" });
+    }
+    const keepUser = storage.getUser(keepId);
+    const removeUser = storage.getUser(removeId);
+    if (!keepUser || !removeUser) {
+      return res.status(404).json({ message: "User not found" });
+    }
+    storage.mergeUsers(keepId, removeId);
+    broadcastAll("team:updated", {});
+    res.json({ ok: true, message: `Merged "${removeUser.displayName}" into "${keepUser.displayName}"` });
+  });
+
   // ── Channel Routes ───────────────────────────────
   app.get("/api/channels", requireAuth, (_req, res) => {
     res.json(storage.getChannels());
