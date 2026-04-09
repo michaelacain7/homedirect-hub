@@ -15,7 +15,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Popover, PopoverTrigger, PopoverContent } from "@/components/ui/popover";
 import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip";
-import { Hash, Plus, Send, Loader2, AtSign, SmilePlus, Search, X, WifiOff } from "lucide-react";
+import { Hash, Plus, Send, Loader2, AtSign, SmilePlus, Search, X, WifiOff, ImagePlus } from "lucide-react";
 import { formatDistanceToNow, format } from "date-fns";
 import { useToast } from "@/hooks/use-toast";
 import type { Channel, Message, User, MessageReaction } from "@shared/schema";
@@ -32,54 +32,83 @@ function getInitials(name: string) {
     .slice(0, 2);
 }
 
-// ── Mention helpers ──────────────────────────────
-/** Render message content with highlighted @mentions */
+// ── Image URL pattern ────────────────────────────
+const IMAGE_URL_REGEX = /!\[image\]\((\/api\/chat\/images\/[\w\-.]+)\)/g;
+
+// ── Mention + Image helpers ─────────────────────
+/** Render message content with highlighted @mentions and inline images */
 function RenderContent({ content, teamMembers }: { content: string; teamMembers: SafeUser[] }) {
-  // Build a sorted list of display names (longest first to match greedily)
   const names = useMemo(
     () => teamMembers.map((u) => u.displayName).sort((a, b) => b.length - a.length),
     [teamMembers]
   );
 
-  const parts = useMemo(() => {
-    if (!names.length) return [{ text: content, isMention: false }];
-
-    // Build regex that matches @DisplayName for any known user
-    const escaped = names.map((n) => n.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
-    const regex = new RegExp(`(@(?:${escaped.join("|")}))(\\b|\\s|$)`, "gi");
-
-    const result: { text: string; isMention: boolean }[] = [];
+  const rendered = useMemo(() => {
+    // First split on image markers
+    const segments: { type: "text" | "image"; value: string }[] = [];
     let lastIdx = 0;
-    let match: RegExpExecArray | null;
-    while ((match = regex.exec(content)) !== null) {
-      if (match.index > lastIdx) {
-        result.push({ text: content.slice(lastIdx, match.index), isMention: false });
+    const imgRegex = /!\[image\]\((\/api\/chat\/images\/[\w\-.]+)\)/g;
+    let imgMatch: RegExpExecArray | null;
+    while ((imgMatch = imgRegex.exec(content)) !== null) {
+      if (imgMatch.index > lastIdx) {
+        segments.push({ type: "text", value: content.slice(lastIdx, imgMatch.index) });
       }
-      result.push({ text: match[1], isMention: true });
-      lastIdx = match.index + match[1].length;
+      segments.push({ type: "image", value: imgMatch[1] });
+      lastIdx = imgMatch.index + imgMatch[0].length;
     }
     if (lastIdx < content.length) {
-      result.push({ text: content.slice(lastIdx), isMention: false });
+      segments.push({ type: "text", value: content.slice(lastIdx) });
     }
-    return result;
+
+    // For text segments, apply mention highlighting
+    const escaped = names.map((n) => n.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
+    const mentionRegex = names.length
+      ? new RegExp(`(@(?:${escaped.join("|")}))(\\b|\\s|$)`, "gi")
+      : null;
+
+    function renderText(text: string, baseKey: number) {
+      if (!mentionRegex) return <Fragment key={baseKey}>{text}</Fragment>;
+      const parts: { text: string; isMention: boolean }[] = [];
+      let idx = 0;
+      let m: RegExpExecArray | null;
+      mentionRegex.lastIndex = 0;
+      while ((m = mentionRegex.exec(text)) !== null) {
+        if (m.index > idx) parts.push({ text: text.slice(idx, m.index), isMention: false });
+        parts.push({ text: m[1], isMention: true });
+        idx = m.index + m[1].length;
+      }
+      if (idx < text.length) parts.push({ text: text.slice(idx), isMention: false });
+      return (
+        <Fragment key={baseKey}>
+          {parts.map((p, j) =>
+            p.isMention ? (
+              <span key={j} className="bg-primary/15 text-primary font-medium rounded px-0.5">{p.text}</span>
+            ) : (
+              <Fragment key={j}>{p.text}</Fragment>
+            )
+          )}
+        </Fragment>
+      );
+    }
+
+    return segments.map((seg, i) => {
+      if (seg.type === "image") {
+        return (
+          <a key={i} href={seg.value} target="_blank" rel="noopener noreferrer" className="block my-1">
+            <img
+              src={seg.value}
+              alt="Shared image"
+              className="max-w-xs max-h-64 rounded-lg border border-border cursor-pointer hover:opacity-90 transition-opacity"
+              loading="lazy"
+            />
+          </a>
+        );
+      }
+      return renderText(seg.value, i);
+    });
   }, [content, names]);
 
-  return (
-    <>
-      {parts.map((p, i) =>
-        p.isMention ? (
-          <span
-            key={i}
-            className="bg-primary/15 text-primary font-medium rounded px-0.5"
-          >
-            {p.text}
-          </span>
-        ) : (
-          <Fragment key={i}>{p.text}</Fragment>
-        )
-      )}
-    </>
-  );
+  return <>{rendered}</>;
 }
 
 type SafeUser = Omit<User, "password">;
@@ -114,6 +143,11 @@ export default function ChatPage() {
   const [mentionQuery, setMentionQuery] = useState<string | null>(null);
   const [mentionIndex, setMentionIndex] = useState(0);
   const [mentionStart, setMentionStart] = useState(-1); // cursor position of the @
+
+  // Image paste/upload state
+  const [pendingImage, setPendingImage] = useState<{ file: File; preview: string } | null>(null);
+  const [imageUploading, setImageUploading] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const { data: channels, isLoading: channelsLoading } = useQuery<Channel[]>({
     queryKey: ["/api/channels"],
@@ -248,11 +282,43 @@ export default function ChatPage() {
     }
   }, [messages]);
 
-  const sendMessage = useCallback(() => {
-    if (!messageText.trim() || !activeChannel) return;
+  const uploadImage = useCallback(async (file: File): Promise<string | null> => {
+    const formData = new FormData();
+    formData.append("image", file);
+    try {
+      const res = await fetch("/api/chat/upload-image", { method: "POST", body: formData, credentials: "include" });
+      if (!res.ok) return null;
+      const data = await res.json();
+      return data.url;
+    } catch {
+      return null;
+    }
+  }, []);
+
+  const sendMessage = useCallback(async () => {
+    if ((!messageText.trim() && !pendingImage) || !activeChannel) return;
+
+    let content = messageText.trim();
+
+    // If there's a pending image, upload it first
+    if (pendingImage) {
+      setImageUploading(true);
+      const url = await uploadImage(pendingImage.file);
+      setImageUploading(false);
+      if (!url) {
+        toast({ title: "Failed to upload image", variant: "destructive" });
+        return;
+      }
+      const imageMarkdown = `![image](${url})`;
+      content = content ? `${content}\n${imageMarkdown}` : imageMarkdown;
+      setPendingImage(null);
+    }
+
+    if (!content) return;
+
     const sent = ws.send("chat:message", {
       channelId: activeChannel,
-      content: messageText.trim(),
+      content,
     });
     if (!sent) {
       toast({
@@ -260,13 +326,38 @@ export default function ChatPage() {
         description: "Connection lost. Reconnecting — please try again in a moment.",
         variant: "destructive",
       });
-      return; // Keep the message text so the user can retry
+      return;
     }
     setMessageText("");
     setMentionQuery(null);
     setHighlightMsgId(null);
-    deepLinkActive.current = false; // re-enable auto-scroll after user interacts
-  }, [messageText, activeChannel, ws, toast]);
+    deepLinkActive.current = false;
+  }, [messageText, activeChannel, ws, toast, pendingImage, uploadImage]);
+
+  const handlePaste = useCallback((e: React.ClipboardEvent) => {
+    const items = e.clipboardData?.items;
+    if (!items) return;
+    for (const item of items) {
+      if (item.type.startsWith("image/")) {
+        e.preventDefault();
+        const file = item.getAsFile();
+        if (file) {
+          const preview = URL.createObjectURL(file);
+          setPendingImage({ file, preview });
+        }
+        return;
+      }
+    }
+  }, []);
+
+  const handleFileSelect = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file && file.type.startsWith("image/")) {
+      const preview = URL.createObjectURL(file);
+      setPendingImage({ file, preview });
+    }
+    e.target.value = "";
+  }, []);
 
   const toggleReaction = useCallback((messageId: number, emoji: string) => {
     ws.send("chat:reaction", { messageId, emoji });
@@ -722,23 +813,58 @@ export default function ChatPage() {
               </div>
             )}
 
+            {/* Image preview */}
+            {pendingImage && (
+              <div className="relative inline-block mb-2">
+                <img
+                  src={pendingImage.preview}
+                  alt="Preview"
+                  className="max-h-32 rounded-lg border border-border"
+                />
+                <button
+                  onClick={() => { URL.revokeObjectURL(pendingImage.preview); setPendingImage(null); }}
+                  className="absolute -top-1.5 -right-1.5 h-5 w-5 rounded-full bg-destructive text-white flex items-center justify-center text-xs hover:bg-destructive/80"
+                >
+                  <X className="h-3 w-3" />
+                </button>
+              </div>
+            )}
+
             <div className="flex gap-2">
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="image/*"
+                className="hidden"
+                onChange={handleFileSelect}
+              />
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                className="shrink-0"
+                onClick={() => fileInputRef.current?.click()}
+                title="Upload image"
+              >
+                <ImagePlus className="h-4 w-4 text-muted-foreground" />
+              </Button>
               <Input
                 ref={inputRef}
-                placeholder="Type a message... Use @ to mention someone"
+                placeholder="Type a message... Paste or attach images"
                 value={messageText}
                 onChange={handleInputChange}
                 onKeyDown={handleKeyDown}
+                onPaste={handlePaste}
                 className="flex-1"
                 data-testid="input-chat-message"
               />
               <Button
                 size="icon"
                 onClick={sendMessage}
-                disabled={!messageText.trim()}
+                disabled={(!messageText.trim() && !pendingImage) || imageUploading}
                 data-testid="button-send-message"
               >
-                <Send className="h-4 w-4" />
+                {imageUploading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
               </Button>
             </div>
           </div>

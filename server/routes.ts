@@ -216,6 +216,32 @@ export async function registerRoutes(
     }
   });
 
+  // ── Chat Image Upload ────────────────────────────
+  app.post("/api/chat/upload-image", requireAuth, upload.single("image"), (req, res) => {
+    const file = req.file;
+    if (!file) return res.status(400).json({ message: "No image uploaded" });
+    if (!file.mimetype.startsWith("image/")) {
+      // Clean up non-image file
+      const filePath = path.join(uploadDir, file.filename);
+      if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
+      return res.status(400).json({ message: "Only images are allowed" });
+    }
+    res.json({
+      url: `/api/chat/images/${file.filename}`,
+      filename: file.originalname,
+      mimeType: file.mimetype,
+    });
+  });
+
+  app.get("/api/chat/images/:filename", requireAuth, (req, res) => {
+    const filename = req.params.filename;
+    // Sanitize: only allow alphanumeric, dashes, dots, underscores
+    if (!/^[\w\-.]+$/.test(filename)) return res.status(400).json({ message: "Invalid filename" });
+    const filePath = path.join(uploadDir, filename);
+    if (!fs.existsSync(filePath)) return res.status(404).json({ message: "Image not found" });
+    res.sendFile(filePath);
+  });
+
   // ── Message Routes ───────────────────────────────
   app.get("/api/messages/search", requireAuth, (req, res) => {
     const query = (req.query.q as string) || "";
