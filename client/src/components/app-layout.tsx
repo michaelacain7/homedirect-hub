@@ -153,7 +153,7 @@ function NotificationBell() {
             </button>
           )}
         </div>
-        <ScrollArea className="max-h-80">
+        <ScrollArea className="max-h-[70vh]">
           {isLoading && open ? (
             <div className="px-4 py-8 text-center text-sm text-muted-foreground">
               Loading...
@@ -164,7 +164,7 @@ function NotificationBell() {
             </div>
           ) : (
             <div className="divide-y divide-border">
-              {notifications.slice(0, 30).map((notif) => (
+              {notifications.slice(0, 50).map((notif) => (
                 <button
                   key={notif.id}
                   onClick={() => handleClick(notif)}

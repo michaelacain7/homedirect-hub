@@ -948,22 +948,13 @@ export async function registerRoutes(
               for (const u of allUsers) {
                 if (u.id !== client.userId) {
                   if (mentionedUserIds.has(u.id)) {
-                    // Tagged mention — higher priority notification
+                    // Tagged mention — only notify when explicitly @mentioned
                     notifyUser(
                       u.id,
                       "chat_mention",
                       `Mentioned in #${channelName}`,
                       `${user.displayName} tagged you: ${preview}`,
                       messageLink
-                    );
-                  } else {
-                    // Regular chat notification
-                    notifyUser(
-                      u.id,
-                      "chat_message",
-                      `#${channelName}`,
-                      `${user.displayName}: ${preview}`,
-                      "/chat"
                     );
                   }
                 }
