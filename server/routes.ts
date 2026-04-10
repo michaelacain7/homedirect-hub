@@ -352,11 +352,25 @@ export async function registerRoutes(
     const userMap = new Map(allUsers.map(u => [u.id, safeUser(u)]));
     const enriched = { ...comment, user: userMap.get(comment.userId) };
     broadcastAll("task:comment", enriched);
-    // Notify assigned users (except the commenter)
+
+    // Detect @mentions
+    const contentLower = content.toLowerCase();
+    const mentionedUserIds = new Set<number>();
+    for (const u of allUsers) {
+      if (contentLower.includes("@" + u.displayName.toLowerCase())) {
+        mentionedUserIds.add(u.id);
+      }
+    }
+
+    // Notify: mentioned users get a tagged notification, others get a regular comment notification
     const assignedIds: number[] = (() => { try { return JSON.parse(task.assignedTo as string); } catch { return []; } })();
-    const notifyIds = [...new Set([...assignedIds, task.createdBy])].filter(id => id !== user.id);
-    for (const uid of notifyIds) {
-      notifyUser(uid, "task_comment", "New Comment on Task", `${user.displayName} commented on "${task.title}"`, "/tasks");
+    const allNotifyIds = [...new Set([...assignedIds, task.createdBy, ...mentionedUserIds])].filter(id => id !== user.id);
+    for (const uid of allNotifyIds) {
+      if (mentionedUserIds.has(uid)) {
+        notifyUser(uid, "task_mention", `Tagged in "${task.title}"`, `${user.displayName} mentioned you: ${content.length > 80 ? content.slice(0, 80) + "..." : content}`, "/tasks");
+      } else {
+        notifyUser(uid, "task_comment", "New Comment on Task", `${user.displayName} commented on "${task.title}"`, "/tasks");
+      }
     }
     res.json(enriched);
   });

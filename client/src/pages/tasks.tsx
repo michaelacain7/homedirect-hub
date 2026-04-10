@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useMemo, Fragment } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { useAuth } from "@/hooks/use-auth";
 import { apiRequest, queryClient } from "@/lib/queryClient";
@@ -21,7 +21,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Plus, Loader2, Trash2, Calendar, Search, X, Check, Send, MessageSquare } from "lucide-react";
+import { Plus, Loader2, Trash2, Calendar, Search, X, Check, Send, MessageSquare, AtSign } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
 import { useToast } from "@/hooks/use-toast";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -641,10 +641,51 @@ export default function TasksPage() {
   );
 }
 
+// ── Render comment with @mentions highlighted ────
+function RenderCommentContent({ content, teamMembers }: { content: string; teamMembers: SafeUser[] }) {
+  const names = useMemo(
+    () => teamMembers.map((u) => u.displayName).sort((a, b) => b.length - a.length),
+    [teamMembers]
+  );
+  const parts = useMemo(() => {
+    if (!names.length) return [{ text: content, isMention: false }];
+    const escaped = names.map((n) => n.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
+    const regex = new RegExp(`(@(?:${escaped.join("|")}))(\\b|\\s|$)`, "gi");
+    const result: { text: string; isMention: boolean }[] = [];
+    let lastIdx = 0;
+    let match: RegExpExecArray | null;
+    while ((match = regex.exec(content)) !== null) {
+      if (match.index > lastIdx) result.push({ text: content.slice(lastIdx, match.index), isMention: false });
+      result.push({ text: match[1], isMention: true });
+      lastIdx = match.index + match[1].length;
+    }
+    if (lastIdx < content.length) result.push({ text: content.slice(lastIdx), isMention: false });
+    return result;
+  }, [content, names]);
+
+  return (
+    <>
+      {parts.map((p, i) =>
+        p.isMention ? (
+          <span key={i} className="bg-primary/15 text-primary font-medium rounded px-0.5">{p.text}</span>
+        ) : (
+          <Fragment key={i}>{p.text}</Fragment>
+        )
+      )}
+    </>
+  );
+}
+
 // ── Task Comments Component ──────────────────────
 function TaskComments({ taskId, currentUser }: { taskId: number; currentUser: any }) {
   const [commentText, setCommentText] = useState("");
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  // @mention state
+  const [mentionQuery, setMentionQuery] = useState<string | null>(null);
+  const [mentionIndex, setMentionIndex] = useState(0);
+  const [mentionStart, setMentionStart] = useState(-1);
 
   type CommentWithUser = TaskComment & { user?: any };
 
@@ -656,6 +697,10 @@ function TaskComments({ taskId, currentUser }: { taskId: number; currentUser: an
     },
   });
 
+  const { data: teamMembers = [] } = useQuery<SafeUser[]>({
+    queryKey: ["/api/team"],
+  });
+
   const addComment = useMutation({
     mutationFn: async (content: string) => {
       const res = await apiRequest("POST", `/api/tasks/${taskId}/comments`, { content });
@@ -664,13 +709,57 @@ function TaskComments({ taskId, currentUser }: { taskId: number; currentUser: an
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/tasks", taskId, "comments"] });
       setCommentText("");
+      setMentionQuery(null);
     },
   });
 
-  // Auto-scroll to bottom on new comments
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [comments]);
+
+  const mentionCandidates = useMemo(() => {
+    if (mentionQuery === null) return [];
+    const q = mentionQuery.toLowerCase();
+    return teamMembers
+      .filter((m) => m.id !== currentUser.id && m.displayName.toLowerCase().includes(q))
+      .slice(0, 6);
+  }, [mentionQuery, teamMembers, currentUser.id]);
+
+  function handleInputChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const val = e.target.value;
+    setCommentText(val);
+    const cursorPos = e.target.selectionStart ?? val.length;
+    const textBefore = val.slice(0, cursorPos);
+    const atMatch = textBefore.match(/@([A-Za-z ]*)$/);
+    if (atMatch) {
+      setMentionQuery(atMatch[1]);
+      setMentionStart(cursorPos - atMatch[0].length);
+      setMentionIndex(0);
+    } else {
+      setMentionQuery(null);
+    }
+  }
+
+  function insertMention(member: SafeUser) {
+    const before = commentText.slice(0, mentionStart);
+    const after = commentText.slice(mentionStart + 1 + (mentionQuery?.length ?? 0));
+    setCommentText(`${before}@${member.displayName} ${after}`);
+    setMentionQuery(null);
+    inputRef.current?.focus();
+  }
+
+  function handleKeyDown(e: React.KeyboardEvent) {
+    if (mentionQuery !== null && mentionCandidates.length > 0) {
+      if (e.key === "ArrowDown") { e.preventDefault(); setMentionIndex((i) => (i + 1) % mentionCandidates.length); return; }
+      if (e.key === "ArrowUp") { e.preventDefault(); setMentionIndex((i) => (i - 1 + mentionCandidates.length) % mentionCandidates.length); return; }
+      if (e.key === "Enter" || e.key === "Tab") { e.preventDefault(); insertMention(mentionCandidates[mentionIndex]); return; }
+      if (e.key === "Escape") { e.preventDefault(); setMentionQuery(null); return; }
+    }
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      handleSend();
+    }
+  }
 
   function handleSend() {
     if (!commentText.trim()) return;
@@ -700,60 +789,73 @@ function TaskComments({ taskId, currentUser }: { taskId: number; currentUser: an
               <p className="text-sm text-muted-foreground">No comments yet. Start the discussion!</p>
             </div>
           ) : (
-            comments.map((c) => {
-              const isMe = c.userId === currentUser.id;
-              return (
-                <div key={c.id} className={`flex gap-2.5 ${isMe ? "" : ""}`}>
-                  <div
-                    className="h-7 w-7 rounded-full flex items-center justify-center text-[9px] font-semibold text-white shrink-0"
-                    style={{ backgroundColor: c.user?.avatarColor || "#4F6BED" }}
-                  >
-                    {getInitials(c.user?.displayName || "?")}
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-baseline gap-2">
-                      <span className="text-xs font-semibold">
-                        {c.user?.displayName || "Unknown"}
-                      </span>
-                      <span className="text-[10px] text-muted-foreground">
-                        {timeAgo(c.createdAt)}
-                      </span>
-                    </div>
-                    <p className="text-sm text-foreground/90 whitespace-pre-wrap break-words mt-0.5">
-                      {c.content}
-                    </p>
-                  </div>
+            comments.map((c) => (
+              <div key={c.id} className="flex gap-2.5">
+                <div
+                  className="h-7 w-7 rounded-full flex items-center justify-center text-[9px] font-semibold text-white shrink-0"
+                  style={{ backgroundColor: c.user?.avatarColor || "#4F6BED" }}
+                >
+                  {getInitials(c.user?.displayName || "?")}
                 </div>
-              );
-            })
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-baseline gap-2">
+                    <span className="text-xs font-semibold">{c.user?.displayName || "Unknown"}</span>
+                    <span className="text-[10px] text-muted-foreground">{timeAgo(c.createdAt)}</span>
+                  </div>
+                  <p className="text-sm text-foreground/90 whitespace-pre-wrap break-words mt-0.5">
+                    <RenderCommentContent content={c.content} teamMembers={teamMembers} />
+                  </p>
+                </div>
+              </div>
+            ))
           )}
           <div ref={messagesEndRef} />
         </div>
       </ScrollArea>
 
-      {/* Input */}
-      <div className="flex gap-2 pt-3 border-t border-border mt-2">
-        <Input
-          placeholder="Write a comment..."
-          value={commentText}
-          onChange={(e) => setCommentText(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter" && !e.shiftKey) {
-              e.preventDefault();
-              handleSend();
-            }
-          }}
-          className="flex-1"
-          data-testid="input-task-comment"
-        />
-        <Button
-          size="icon"
-          onClick={handleSend}
-          disabled={!commentText.trim() || addComment.isPending}
-          data-testid="button-send-task-comment"
-        >
-          <Send className="h-4 w-4" />
-        </Button>
+      {/* Input with @mention autocomplete */}
+      <div className="relative pt-3 border-t border-border mt-2">
+        {mentionQuery !== null && mentionCandidates.length > 0 && (
+          <div className="absolute bottom-full left-0 right-0 mb-1 bg-popover border border-border rounded-lg shadow-lg overflow-hidden z-50">
+            {mentionCandidates.map((member, idx) => (
+              <button
+                key={member.id}
+                onMouseDown={(e) => { e.preventDefault(); insertMention(member); }}
+                className={`w-full flex items-center gap-2.5 px-3 py-2 text-sm transition-colors ${
+                  idx === mentionIndex ? "bg-accent text-accent-foreground" : "hover:bg-accent/50"
+                }`}
+              >
+                <div
+                  className="h-6 w-6 rounded-full flex items-center justify-center text-[9px] font-semibold text-white shrink-0"
+                  style={{ backgroundColor: member.avatarColor }}
+                >
+                  {getInitials(member.displayName)}
+                </div>
+                <span className="font-medium">{member.displayName}</span>
+                <AtSign className="h-3 w-3 text-muted-foreground ml-auto" />
+              </button>
+            ))}
+          </div>
+        )}
+        <div className="flex gap-2">
+          <Input
+            ref={inputRef}
+            placeholder="Write a comment... Use @ to tag someone"
+            value={commentText}
+            onChange={handleInputChange}
+            onKeyDown={handleKeyDown}
+            className="flex-1"
+            data-testid="input-task-comment"
+          />
+          <Button
+            size="icon"
+            onClick={handleSend}
+            disabled={!commentText.trim() || addComment.isPending}
+            data-testid="button-send-task-comment"
+          >
+            <Send className="h-4 w-4" />
+          </Button>
+        </div>
       </div>
     </div>
   );
