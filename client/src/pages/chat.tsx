@@ -38,7 +38,7 @@ const IMAGE_MARKER_REGEX = /!\[image\]\(((?:\/api\/chat\/images\/[\w\-.]+|data:[
 
 // ── Mention + Image helpers ─────────────────────
 /** Render message content with highlighted @mentions and inline images */
-function RenderContent({ content, teamMembers }: { content: string; teamMembers: SafeUser[] }) {
+function RenderContent({ content, teamMembers, onImageClick }: { content: string; teamMembers: SafeUser[]; onImageClick?: (src: string) => void }) {
   const names = useMemo(
     () => teamMembers.map((u) => u.displayName).sort((a, b) => b.length - a.length),
     [teamMembers]
@@ -95,14 +95,14 @@ function RenderContent({ content, teamMembers }: { content: string; teamMembers:
     return segments.map((seg, i) => {
       if (seg.type === "image") {
         return (
-          <a key={i} href={seg.value} target="_blank" rel="noopener noreferrer" className="block my-1">
+          <button key={i} type="button" onClick={() => onImageClick?.(seg.value)} className="block my-1 text-left">
             <img
               src={seg.value}
               alt="Shared image"
               className="max-w-xs max-h-64 rounded-lg border border-border cursor-pointer hover:opacity-90 transition-opacity"
               loading="lazy"
             />
-          </a>
+          </button>
         );
       }
       return renderText(seg.value, i);
@@ -120,6 +120,7 @@ export default function ChatPage() {
   const { toast } = useToast();
   const [activeChannel, setActiveChannel] = useState<number | null>(null);
   const [messageText, setMessageText] = useState("");
+  const [lightboxSrc, setLightboxSrc] = useState<string | null>(null);
   const [typingUsers, setTypingUsers] = useState<Map<number, string>>(
     new Map()
   );
@@ -699,7 +700,7 @@ export default function ChatPage() {
                       </span>
                     </div>
                     <p className="text-sm text-foreground/90 whitespace-pre-wrap break-words">
-                      <RenderContent content={msg.content} teamMembers={teamMembers} />
+                      <RenderContent content={msg.content} teamMembers={teamMembers} onImageClick={setLightboxSrc} />
                     </p>
 
                     {/* Reaction chips */}
@@ -871,6 +872,27 @@ export default function ChatPage() {
           </div>
         )}
       </div>
+
+      {/* Image lightbox */}
+      {lightboxSrc && (
+        <div
+          className="fixed inset-0 z-[100] bg-black/80 flex items-center justify-center p-4 cursor-pointer"
+          onClick={() => setLightboxSrc(null)}
+        >
+          <button
+            onClick={() => setLightboxSrc(null)}
+            className="absolute top-4 right-4 h-8 w-8 rounded-full bg-white/20 hover:bg-white/30 flex items-center justify-center text-white transition-colors"
+          >
+            <X className="h-5 w-5" />
+          </button>
+          <img
+            src={lightboxSrc}
+            alt="Full size"
+            className="max-w-[90vw] max-h-[90vh] rounded-lg object-contain"
+            onClick={(e) => e.stopPropagation()}
+          />
+        </div>
+      )}
 
       {/* CSS for highlight flash animation */}
       <style>{`
