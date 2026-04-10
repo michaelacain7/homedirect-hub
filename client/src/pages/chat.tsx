@@ -33,7 +33,8 @@ function getInitials(name: string) {
 }
 
 // ── Image URL pattern ────────────────────────────
-const IMAGE_URL_REGEX = /!\[image\]\((\/api\/chat\/images\/[\w\-.]+)\)/g;
+// Matches both old path-based URLs and new data: URLs
+const IMAGE_MARKER_REGEX = /!\[image\]\(((?:\/api\/chat\/images\/[\w\-.]+|data:[^)]+))\)/g;
 
 // ── Mention + Image helpers ─────────────────────
 /** Render message content with highlighted @mentions and inline images */
@@ -47,7 +48,7 @@ function RenderContent({ content, teamMembers }: { content: string; teamMembers:
     // First split on image markers
     const segments: { type: "text" | "image"; value: string }[] = [];
     let lastIdx = 0;
-    const imgRegex = /!\[image\]\((\/api\/chat\/images\/[\w\-.]+)\)/g;
+    const imgRegex = /!\[image\]\(((?:\/api\/chat\/images\/[\w\-.]+|data:[^)]+))\)/g;
     let imgMatch: RegExpExecArray | null;
     while ((imgMatch = imgRegex.exec(content)) !== null) {
       if (imgMatch.index > lastIdx) {

@@ -233,13 +233,19 @@ export async function registerRoutes(
     const file = req.file;
     if (!file) return res.status(400).json({ message: "No image uploaded" });
     if (!file.mimetype.startsWith("image/")) {
-      // Clean up non-image file
       const filePath = path.join(uploadDir, file.filename);
       if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
       return res.status(400).json({ message: "Only images are allowed" });
     }
+    // Read file and convert to base64 data URL for persistence
+    const filePath = path.join(uploadDir, file.filename);
+    const fileBuffer = fs.readFileSync(filePath);
+    const base64 = fileBuffer.toString("base64");
+    const dataUrl = `data:${file.mimetype};base64,${base64}`;
+    // Clean up the temp file
+    fs.unlinkSync(filePath);
     res.json({
-      url: `/api/chat/images/${file.filename}`,
+      url: dataUrl,
       filename: file.originalname,
       mimeType: file.mimetype,
     });
@@ -247,7 +253,6 @@ export async function registerRoutes(
 
   app.get("/api/chat/images/:filename", requireAuth, (req, res) => {
     const filename = req.params.filename;
-    // Sanitize: only allow alphanumeric, dashes, dots, underscores
     if (!/^[\w\-.]+$/.test(filename)) return res.status(400).json({ message: "Invalid filename" });
     const filePath = path.join(uploadDir, filename);
     if (!fs.existsSync(filePath)) return res.status(404).json({ message: "Image not found" });
