@@ -42,6 +42,9 @@ export interface IStorage {
   getAllUsers(): User[];
   updateUserRole(id: number, role: string): User | undefined;
 
+  // User profile updates
+  updateUserProfile(id: number, data: { title?: string; reportsTo?: number | null }): User | undefined;
+
   // Channels
   getChannels(): Channel[];
   getChannel(id: number): Channel | undefined;
@@ -159,6 +162,12 @@ export class DatabaseStorage implements IStorage {
   }
   updateUserRole(id: number, role: string): User | undefined {
     return db.update(users).set({ role }).where(eq(users.id, id)).returning().get();
+  }
+  updateUserProfile(id: number, data: { title?: string; reportsTo?: number | null }): User | undefined {
+    const updateData: any = {};
+    if (data.title !== undefined) updateData.title = data.title;
+    if (data.reportsTo !== undefined) updateData.reportsTo = data.reportsTo;
+    return db.update(users).set(updateData).where(eq(users.id, id)).returning().get();
   }
 
   // ── Channels ──
@@ -501,6 +510,8 @@ export class DatabaseStorage implements IStorage {
         password TEXT NOT NULL,
         display_name TEXT NOT NULL,
         role TEXT NOT NULL DEFAULT 'member',
+        title TEXT NOT NULL DEFAULT '',
+        reports_to INTEGER,
         avatar_color TEXT NOT NULL DEFAULT '#4F6BED',
         created_at TEXT NOT NULL DEFAULT ''
       );
@@ -632,6 +643,10 @@ export class DatabaseStorage implements IStorage {
 
     // Promote all users to admin
     try { sqlite.exec(`UPDATE users SET role = 'admin'`); } catch {}
+
+    // Add title and reports_to columns to users if missing
+    try { sqlite.exec(`ALTER TABLE users ADD COLUMN title TEXT NOT NULL DEFAULT ''`); } catch {}
+    try { sqlite.exec(`ALTER TABLE users ADD COLUMN reports_to INTEGER`); } catch {}
 
     // Add phase column to tasks if missing (migration for existing DBs)
     try { sqlite.exec(`ALTER TABLE tasks ADD COLUMN phase TEXT NOT NULL DEFAULT 'phase-1'`); } catch {}

@@ -184,6 +184,18 @@ export async function registerRoutes(
     res.json(safeUser(updated));
   });
 
+  app.put("/api/team/:id/profile", requireAuth, (req, res) => {
+    const user = req.user as any;
+    if (user.role !== "admin") return res.status(403).json({ message: "Admins only" });
+    const { title, reportsTo } = req.body;
+    const updated = storage.updateUserProfile(Number(req.params.id), {
+      title: title !== undefined ? title : undefined,
+      reportsTo: reportsTo !== undefined ? reportsTo : undefined,
+    });
+    if (!updated) return res.status(404).json({ message: "User not found" });
+    res.json(safeUser(updated));
+  });
+
   app.post("/api/team/merge", requireAuth, (req, res) => {
     const user = req.user as any;
     if (user.role !== "admin") return res.status(403).json({ message: "Admins only" });

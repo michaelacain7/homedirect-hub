@@ -16,6 +16,7 @@ import TeamPage from "@/pages/team";
 import CalendarPage from "@/pages/calendar";
 import MeetingsPage from "@/pages/meetings";
 import TaskTrackingPage from "@/pages/task-tracking";
+import OrgChartPage from "@/pages/org-chart";
 import NotFound from "@/pages/not-found";
 import { Loader2 } from "lucide-react";
 
@@ -45,6 +46,7 @@ function AppRouter() {
         <Route path="/files" component={FilesPage} />
         <Route path="/calendar" component={CalendarPage} />
         <Route path="/meetings" component={MeetingsPage} />
+        <Route path="/org-chart" component={OrgChartPage} />
         <Route path="/team" component={TeamPage} />
         <Route component={NotFound} />
       </Switch>

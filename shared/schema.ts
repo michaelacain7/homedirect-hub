@@ -10,6 +10,8 @@ export const users = sqliteTable("users", {
   password: text("password").notNull(),
   displayName: text("display_name").notNull(),
   role: text("role").notNull().default("member"), // admin | member
+  title: text("title").notNull().default(""), // job title e.g. "CEO", "CTO"
+  reportsTo: integer("reports_to"), // user ID of manager (for org chart)
   avatarColor: text("avatar_color").notNull().default("#4F6BED"),
   createdAt: text("created_at").notNull().default(""),
 });
