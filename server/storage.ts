@@ -13,6 +13,9 @@ import {
   type CalendarEvent, type InsertCalendarEvent, calendarEvents,
   type MeetingRequest, type InsertMeetingRequest, meetingRequests,
   type TaskComment, type InsertTaskComment, taskComments,
+  type DocumentChunk, type InsertDocumentChunk, documentChunks,
+  type AiConversation, type InsertAiConversation, aiConversations,
+  type AiMessage, type InsertAiMessage, aiMessages,
 } from "@shared/schema";
 import { drizzle } from "drizzle-orm/better-sqlite3";
 import Database from "better-sqlite3";
@@ -130,6 +133,23 @@ export interface IStorage {
   // Auth helpers
   verifyPassword(plain: string, hash: string): boolean;
   hashPassword(plain: string): string;
+
+  // Document Chunks (RAG)
+  getChunksBySource(sourceType: string, sourceId: number): DocumentChunk[];
+  getAllChunks(): DocumentChunk[];
+  createDocumentChunk(data: InsertDocumentChunk): DocumentChunk;
+  deleteChunksBySource(sourceType: string, sourceId: number): void;
+
+  // AI Conversations
+  getConversationsByUser(userId: number): AiConversation[];
+  getConversation(id: number): AiConversation | undefined;
+  createConversation(data: InsertAiConversation): AiConversation;
+  updateConversationTitle(id: number, title: string): AiConversation | undefined;
+  deleteConversation(id: number): void;
+
+  // AI Messages
+  getMessagesByConversation(conversationId: number): AiMessage[];
+  createAiMessage(data: InsertAiMessage): AiMessage;
 
   // User merge
   mergeUsers(keepId: number, removeId: number): void;
@@ -404,6 +424,46 @@ export class DatabaseStorage implements IStorage {
     db.delete(meetingRequests).where(eq(meetingRequests.id, id)).run();
   }
 
+  // ── Document Chunks ──
+  getChunksBySource(sourceType: string, sourceId: number): DocumentChunk[] {
+    return db.select().from(documentChunks).where(and(eq(documentChunks.sourceType, sourceType), eq(documentChunks.sourceId, sourceId))).all();
+  }
+  getAllChunks(): DocumentChunk[] {
+    return db.select().from(documentChunks).all();
+  }
+  createDocumentChunk(data: InsertDocumentChunk): DocumentChunk {
+    return db.insert(documentChunks).values({ ...data, createdAt: now() }).returning().get();
+  }
+  deleteChunksBySource(sourceType: string, sourceId: number): void {
+    db.delete(documentChunks).where(and(eq(documentChunks.sourceType, sourceType), eq(documentChunks.sourceId, sourceId))).run();
+  }
+
+  // ── AI Conversations ──
+  getConversationsByUser(userId: number): AiConversation[] {
+    return db.select().from(aiConversations).where(eq(aiConversations.userId, userId)).orderBy(desc(aiConversations.id)).all();
+  }
+  getConversation(id: number): AiConversation | undefined {
+    return db.select().from(aiConversations).where(eq(aiConversations.id, id)).get();
+  }
+  createConversation(data: InsertAiConversation): AiConversation {
+    return db.insert(aiConversations).values({ ...data, createdAt: now() }).returning().get();
+  }
+  updateConversationTitle(id: number, title: string): AiConversation | undefined {
+    return db.update(aiConversations).set({ title }).where(eq(aiConversations.id, id)).returning().get();
+  }
+  deleteConversation(id: number): void {
+    db.delete(aiMessages).where(eq(aiMessages.conversationId, id)).run();
+    db.delete(aiConversations).where(eq(aiConversations.id, id)).run();
+  }
+
+  // ── AI Messages ──
+  getMessagesByConversation(conversationId: number): AiMessage[] {
+    return db.select().from(aiMessages).where(eq(aiMessages.conversationId, conversationId)).orderBy(asc(aiMessages.id)).all();
+  }
+  createAiMessage(data: InsertAiMessage): AiMessage {
+    return db.insert(aiMessages).values({ ...data, createdAt: now() }).returning().get();
+  }
+
   // ── User Merge ──
   mergeUsers(keepId: number, removeId: number): void {
     const removeStr = `"${removeId}"`;
@@ -635,6 +695,28 @@ export class DatabaseStorage implements IStorage {
         calendar_event_id INTEGER,
         created_at TEXT NOT NULL DEFAULT '',
         updated_at TEXT NOT NULL DEFAULT ''
+      );
+      CREATE TABLE IF NOT EXISTS document_chunks (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        source_type TEXT NOT NULL,
+        source_id INTEGER NOT NULL,
+        source_name TEXT NOT NULL DEFAULT '',
+        content TEXT NOT NULL,
+        embedding TEXT,
+        created_at TEXT NOT NULL DEFAULT ''
+      );
+      CREATE TABLE IF NOT EXISTS ai_conversations (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id INTEGER NOT NULL,
+        title TEXT NOT NULL DEFAULT 'New Conversation',
+        created_at TEXT NOT NULL DEFAULT ''
+      );
+      CREATE TABLE IF NOT EXISTS ai_messages (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        conversation_id INTEGER NOT NULL,
+        role TEXT NOT NULL,
+        content TEXT NOT NULL,
+        created_at TEXT NOT NULL DEFAULT ''
       );
     `);
 

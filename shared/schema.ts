@@ -257,3 +257,43 @@ export const insertMeetingRequestSchema = createInsertSchema(meetingRequests).om
 });
 export type InsertMeetingRequest = z.infer<typeof insertMeetingRequestSchema>;
 export type MeetingRequest = typeof meetingRequests.$inferSelect;
+
+// ── Document Chunks (RAG) ────────────────────────
+export const documentChunks = sqliteTable("document_chunks", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  sourceType: text("source_type").notNull(), // file | task | message | announcement
+  sourceId: integer("source_id").notNull(), // ID of the source record
+  sourceName: text("source_name").notNull().default(""), // human-readable label
+  content: text("content").notNull(), // chunk text
+  embedding: text("embedding"), // JSON array of floats (nullable if embeddings disabled)
+  createdAt: text("created_at").notNull().default(""),
+});
+
+export const insertDocumentChunkSchema = createInsertSchema(documentChunks).omit({ id: true, createdAt: true });
+export type InsertDocumentChunk = z.infer<typeof insertDocumentChunkSchema>;
+export type DocumentChunk = typeof documentChunks.$inferSelect;
+
+// ── AI Conversations ─────────────────────────────
+export const aiConversations = sqliteTable("ai_conversations", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  userId: integer("user_id").notNull(),
+  title: text("title").notNull().default("New Conversation"),
+  createdAt: text("created_at").notNull().default(""),
+});
+
+export const insertAiConversationSchema = createInsertSchema(aiConversations).omit({ id: true, createdAt: true });
+export type InsertAiConversation = z.infer<typeof insertAiConversationSchema>;
+export type AiConversation = typeof aiConversations.$inferSelect;
+
+// ── AI Messages ──────────────────────────────────
+export const aiMessages = sqliteTable("ai_messages", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  conversationId: integer("conversation_id").notNull(),
+  role: text("role").notNull(), // user | assistant | system
+  content: text("content").notNull(),
+  createdAt: text("created_at").notNull().default(""),
+});
+
+export const insertAiMessageSchema = createInsertSchema(aiMessages).omit({ id: true, createdAt: true });
+export type InsertAiMessage = z.infer<typeof insertAiMessageSchema>;
+export type AiMessage = typeof aiMessages.$inferSelect;
