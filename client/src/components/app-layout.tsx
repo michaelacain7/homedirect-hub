@@ -138,7 +138,7 @@ function NotificationBell() {
         side="right"
         align="start"
         sideOffset={12}
-        className="w-80 p-0 bg-popover border border-border shadow-lg rounded-lg"
+        className="w-80 max-h-[80vh] p-0 bg-popover border border-border shadow-lg rounded-lg overflow-hidden flex flex-col"
       >
         <div className="flex items-center justify-between px-4 py-3 border-b border-border">
           <h3 className="text-sm font-semibold">Notifications</h3>
@@ -153,7 +153,7 @@ function NotificationBell() {
             </button>
           )}
         </div>
-        <ScrollArea className="max-h-[70vh]">
+        <ScrollArea className="flex-1 overflow-auto">
           {isLoading && open ? (
             <div className="px-4 py-8 text-center text-sm text-muted-foreground">
               Loading...
