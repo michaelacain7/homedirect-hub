@@ -17,6 +17,7 @@ import CalendarPage from "@/pages/calendar";
 import MeetingsPage from "@/pages/meetings";
 import TaskTrackingPage from "@/pages/task-tracking";
 import OrgChartPage from "@/pages/org-chart";
+import AIAssistantPage from "@/pages/ai-assistant";
 import NotFound from "@/pages/not-found";
 import { Loader2 } from "lucide-react";
 
@@ -39,6 +40,7 @@ function AppRouter() {
     <AppLayout>
       <Switch>
         <Route path="/" component={DashboardPage} />
+        <Route path="/ai" component={AIAssistantPage} />
         <Route path="/chat" component={ChatPage} />
         <Route path="/tasks" component={TasksPage} />
         <Route path="/tracking" component={TaskTrackingPage} />

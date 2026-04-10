@@ -15,6 +15,20 @@ import {
   sendMeetingNewTimeEmail,
   sendNotificationEmail,
 } from "./email";
+import {
+  isAIEnabled,
+  chatCompletionStream,
+  type ChatMessage,
+  extractTextFromFile,
+} from "./ai";
+import {
+  isVectorStoreEnabled,
+  indexDocument,
+  removeDocument,
+  semanticSearch,
+  getRAGContext,
+  keywordSearch,
+} from "./vector-store";
 import session from "express-session";
 import MemoryStore from "memorystore";
 import passport from "passport";
@@ -866,6 +880,213 @@ export async function registerRoutes(
     storage.deleteMeetingRequest(request.id);
     broadcastAll("meeting-request:deleted", { id: request.id });
     res.json({ ok: true });
+  });
+
+  // ── AI Routes ────────────────────────────────────
+  app.get("/api/ai/status", requireAuth, (_req, res) => {
+    res.json({
+      aiEnabled: isAIEnabled(),
+      vectorStoreEnabled: isVectorStoreEnabled(),
+    });
+  });
+
+  // AI Conversations
+  app.get("/api/ai/conversations", requireAuth, (req, res) => {
+    const user = req.user as any;
+    res.json(storage.getConversationsByUser(user.id));
+  });
+
+  app.post("/api/ai/conversations", requireAuth, (req, res) => {
+    const user = req.user as any;
+    const conv = storage.createConversation({ userId: user.id, title: req.body.title || "New Conversation" });
+    res.json(conv);
+  });
+
+  app.delete("/api/ai/conversations/:id", requireAuth, (req, res) => {
+    const conv = storage.getConversation(Number(req.params.id));
+    if (!conv) return res.status(404).json({ message: "Not found" });
+    const user = req.user as any;
+    if (conv.userId !== user.id) return res.status(403).json({ message: "Not yours" });
+    storage.deleteConversation(conv.id);
+    res.json({ ok: true });
+  });
+
+  app.get("/api/ai/conversations/:id/messages", requireAuth, (req, res) => {
+    res.json(storage.getMessagesByConversation(Number(req.params.id)));
+  });
+
+  // AI Chat (streaming)
+  app.post("/api/ai/chat", requireAuth, async (req, res) => {
+    if (!isAIEnabled()) return res.status(503).json({ message: "AI not configured" });
+
+    const user = req.user as any;
+    const { conversationId, message } = req.body;
+    if (!message?.trim()) return res.status(400).json({ message: "Message required" });
+
+    let convId = conversationId;
+    if (!convId) {
+      const conv = storage.createConversation({ userId: user.id, title: message.slice(0, 60) });
+      convId = conv.id;
+    }
+
+    // Save user message
+    storage.createAiMessage({ conversationId: convId, role: "user", content: message });
+
+    // Get conversation history
+    const history = storage.getMessagesByConversation(convId);
+    const chatMessages: ChatMessage[] = [];
+
+    // Build RAG context
+    let ragContext = "";
+    if (isVectorStoreEnabled()) {
+      ragContext = await getRAGContext(message);
+    } else {
+      // Fallback: keyword search across local content
+      const allTasks = storage.getAllTasks();
+      const allContent = allTasks.map(t => ({
+        sourceType: "task",
+        sourceId: t.id,
+        sourceName: t.title,
+        content: `Task: ${t.title}\nDescription: ${t.description}\nStatus: ${t.status}\nPriority: ${t.priority}\nPhase: ${t.phase}`,
+      }));
+      const results = keywordSearch(message, allContent);
+      if (results.length) {
+        ragContext = results.map(r => `[${r.source_name}]\n${r.content}`).join("\n\n---\n\n");
+      }
+    }
+
+    // System prompt
+    const systemPrompt = `You are the HomeDirectAI assistant, an AI helper embedded in the HomeDirectAI team collaboration hub. You help team members with questions about their projects, tasks, files, and company information.
+
+You are knowledgeable about real estate technology, AI-powered real estate platforms, Florida real estate regulations, and startup operations.
+
+Be concise, helpful, and professional. When referencing specific tasks or documents, cite them clearly.
+
+${ragContext ? `\n--- RELEVANT CONTEXT FROM COMPANY DATA ---\n${ragContext}\n--- END CONTEXT ---\n\nUse the above context to inform your answers when relevant. If the context doesn't contain the answer, say so and provide your best general knowledge.` : ""}
+
+Current user: ${user.displayName}
+Current date: ${new Date().toLocaleDateString()}`;
+
+    chatMessages.push({ role: "system", content: systemPrompt });
+
+    // Add conversation history (last 20 messages for context window)
+    const recentHistory = history.slice(-20);
+    for (const msg of recentHistory) {
+      if (msg.role === "user" || msg.role === "assistant") {
+        chatMessages.push({ role: msg.role as "user" | "assistant", content: msg.content });
+      }
+    }
+
+    // Stream response
+    res.setHeader("Content-Type", "text/event-stream");
+    res.setHeader("Cache-Control", "no-cache");
+    res.setHeader("Connection", "keep-alive");
+
+    // Send conversation ID first
+    res.write(`data: ${JSON.stringify({ type: "meta", conversationId: convId })}\n\n`);
+
+    try {
+      let fullResponse = "";
+      for await (const chunk of chatCompletionStream(chatMessages)) {
+        fullResponse += chunk;
+        res.write(`data: ${JSON.stringify({ type: "chunk", content: chunk })}\n\n`);
+      }
+
+      // Save assistant response
+      storage.createAiMessage({ conversationId: convId, role: "assistant", content: fullResponse });
+
+      // Auto-title the conversation from first message
+      if (history.length === 0) {
+        const title = message.length > 50 ? message.slice(0, 50) + "..." : message;
+        storage.updateConversationTitle(convId, title);
+      }
+
+      res.write(`data: ${JSON.stringify({ type: "done" })}\n\n`);
+      res.end();
+    } catch (err: any) {
+      console.error("[ai] Chat error:", err);
+      res.write(`data: ${JSON.stringify({ type: "error", message: err.message || "AI error" })}\n\n`);
+      res.end();
+    }
+  });
+
+  // AI Semantic Search
+  app.get("/api/ai/search", requireAuth, async (req, res) => {
+    const query = (req.query.q as string) || "";
+    if (!query || query.length < 2) return res.json([]);
+
+    if (isVectorStoreEnabled()) {
+      const results = await semanticSearch(query, { limit: 15 });
+      res.json(results);
+    } else if (isAIEnabled()) {
+      // Fallback keyword search
+      const allTasks = storage.getAllTasks();
+      const allAnnouncements = storage.getAnnouncements();
+      const allContent = [
+        ...allTasks.map(t => ({
+          sourceType: "task", sourceId: t.id, sourceName: t.title,
+          content: `${t.title} ${t.description} ${t.status} ${t.priority} ${t.category}`,
+        })),
+        ...allAnnouncements.map(a => ({
+          sourceType: "announcement", sourceId: a.id, sourceName: a.title,
+          content: `${a.title} ${a.content}`,
+        })),
+      ];
+      res.json(keywordSearch(query, allContent, 15));
+    } else {
+      res.json([]);
+    }
+  });
+
+  // Index a file into the vector store (triggered on upload)
+  app.post("/api/ai/index-file/:fileId", requireAuth, async (req, res) => {
+    if (!isVectorStoreEnabled()) return res.json({ indexed: 0, message: "Vector store not configured" });
+    const file = storage.getFile(Number(req.params.fileId));
+    if (!file) return res.status(404).json({ message: "File not found" });
+
+    const filePath = path.join(uploadDir, file.storedName);
+    if (!fs.existsSync(filePath)) return res.status(404).json({ message: "File not on disk" });
+
+    const content = fs.readFileSync(filePath);
+    const text = extractTextFromFile(content, file.mimeType, file.originalName);
+    if (!text) return res.json({ indexed: 0, message: "Unsupported file type for indexing" });
+
+    const count = await indexDocument("file", file.id, file.originalName, text);
+    res.json({ indexed: count });
+  });
+
+  // Bulk re-index all content
+  app.post("/api/ai/reindex", requireAuth, async (req, res) => {
+    const user = req.user as any;
+    if (user.role !== "admin") return res.status(403).json({ message: "Admins only" });
+    if (!isVectorStoreEnabled()) return res.json({ message: "Vector store not configured" });
+
+    let total = 0;
+
+    // Index tasks
+    const tasks = storage.getAllTasks();
+    for (const t of tasks) {
+      const text = `Task: ${t.title}\nDescription: ${t.description}\nStatus: ${t.status}\nPriority: ${t.priority}\nPhase: ${t.phase}\nCategory: ${t.category}`;
+      total += await indexDocument("task", t.id, t.title, text);
+    }
+
+    // Index announcements
+    const announcements = storage.getAnnouncements();
+    for (const a of announcements) {
+      total += await indexDocument("announcement", a.id, a.title, `${a.title}\n${a.content}`);
+    }
+
+    // Index text files
+    const files = storage.getAllFiles();
+    for (const f of files) {
+      const filePath = path.join(uploadDir, f.storedName);
+      if (!fs.existsSync(filePath)) continue;
+      const content = fs.readFileSync(filePath);
+      const text = extractTextFromFile(content, f.mimeType, f.originalName);
+      if (text) total += await indexDocument("file", f.id, f.originalName, text);
+    }
+
+    res.json({ indexed: total, message: `Indexed ${total} chunks` });
   });
 
   // ── Dashboard Stats ──────────────────────────────

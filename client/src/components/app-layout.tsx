@@ -28,6 +28,7 @@ import {
   Handshake,
   BarChart3,
   Network,
+  Bot,
 } from "lucide-react";
 
 // ── Notification Bell Component ──────────────────
@@ -218,6 +219,7 @@ export function useWS() {
 
 const navItems = [
   { href: "/", label: "Dashboard", icon: LayoutDashboard },
+  { href: "/ai", label: "AI Assistant", icon: Bot },
   { href: "/chat", label: "Chat", icon: MessageSquare },
   { href: "/tasks", label: "Tasks", icon: KanbanSquare },
   { href: "/tracking", label: "Tracking", icon: BarChart3 },
