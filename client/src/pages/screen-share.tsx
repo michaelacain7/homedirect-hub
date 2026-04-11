@@ -225,7 +225,7 @@ export default function ScreenSharePage() {
   const mySession = sessions.find((s) => s.hostId === user?.id);
 
   return (
-    <div className="p-4 md:p-6 space-y-6 max-w-5xl" data-testid="page-screen-share">
+    <div className="p-4 md:p-6 space-y-6" data-testid="page-screen-share">
       <div>
         <h1 className="text-xl font-semibold">Screen Share</h1>
         <p className="text-sm text-muted-foreground mt-0.5">
@@ -261,7 +261,7 @@ export default function ScreenSharePage() {
               autoPlay
               muted
               playsInline
-              className="w-full max-h-[400px] rounded-lg border border-border bg-black object-contain"
+              className="w-full max-h-[80vh] rounded-lg border border-border bg-black object-contain"
             />
           </CardContent>
         </Card>
@@ -293,7 +293,7 @@ export default function ScreenSharePage() {
               ref={remoteVideoRef}
               autoPlay
               playsInline
-              className={`w-full max-h-[500px] rounded-lg border border-border bg-black object-contain ${connecting ? "hidden" : ""}`}
+              className={`w-full max-h-[80vh] rounded-lg border border-border bg-black object-contain ${connecting ? "hidden" : ""}`}
             />
           </CardContent>
         </Card>
