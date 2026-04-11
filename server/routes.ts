@@ -1,7 +1,7 @@
 import type { Express, Request, Response } from "express";
 import { createServer, type Server } from "http";
 import { WebSocketServer, WebSocket } from "ws";
-import { storage } from "./storage";
+import { storage, sqlite } from "./storage";
 import {
   insertUserSchema, insertChannelSchema, insertMessageSchema,
   insertTaskSchema, insertTodoSchema, insertAnnouncementSchema,
@@ -1164,6 +1164,157 @@ Current date: ${new Date().toLocaleDateString()}`;
     }
 
     res.json({ indexed: total, message: `Indexed ${total} chunks` });
+  });
+
+  // ── Database Export/Import (Admin) ───────────────
+  app.get("/api/admin/export", requireAuth, (_req, res) => {
+    const user = _req.user as any;
+    if (user.role !== "admin") return res.status(403).json({ message: "Admins only" });
+    const data = {
+      users: storage.getAllUsers().map(u => ({ ...u })),
+      channels: storage.getChannels(),
+      messages: sqlite.prepare("SELECT * FROM messages ORDER BY id").all(),
+      tasks: storage.getAllTasks(),
+      taskComments: sqlite.prepare("SELECT * FROM task_comments ORDER BY id").all(),
+      todos: sqlite.prepare("SELECT * FROM todos ORDER BY id").all(),
+      files: storage.getAllFiles(),
+      fileFolders: storage.getAllFileFolders(),
+      announcements: storage.getAnnouncements(),
+      milestones: storage.getMilestones(),
+      notifications: sqlite.prepare("SELECT * FROM notifications ORDER BY id").all(),
+      messageReactions: sqlite.prepare("SELECT * FROM message_reactions ORDER BY id").all(),
+      calendarEvents: storage.getAllCalendarEvents(),
+      knowledgeArticles: storage.getAllKnowledgeArticles(),
+    };
+    // Include optional tables
+    try { (data as any).meetingRequests = sqlite.prepare("SELECT * FROM meeting_requests ORDER BY id").all(); } catch {}
+    try { (data as any).aiConversations = sqlite.prepare("SELECT * FROM ai_conversations ORDER BY id").all(); } catch {}
+    try { (data as any).aiMessages = sqlite.prepare("SELECT * FROM ai_messages ORDER BY id").all(); } catch {}
+    res.json(data);
+  });
+
+  app.post("/api/admin/import", requireAuth, (req, res) => {
+    const user = req.user as any;
+    if (user.role !== "admin") return res.status(403).json({ message: "Admins only" });
+    const data = req.body;
+    if (!data || !data.users) return res.status(400).json({ message: "Invalid data" });
+
+    try {
+      // Clear existing data (order matters for foreign keys)
+      sqlite.exec("DELETE FROM ai_messages");
+      sqlite.exec("DELETE FROM ai_conversations");
+      sqlite.exec("DELETE FROM message_reactions");
+      sqlite.exec("DELETE FROM task_comments");
+      sqlite.exec("DELETE FROM notifications");
+      sqlite.exec("DELETE FROM messages");
+      sqlite.exec("DELETE FROM calendar_events");
+      try { sqlite.exec("DELETE FROM meeting_requests"); } catch {}
+      try { sqlite.exec("DELETE FROM knowledge_articles"); } catch {}
+      sqlite.exec("DELETE FROM tasks");
+      sqlite.exec("DELETE FROM todos");
+      sqlite.exec("DELETE FROM files");
+      sqlite.exec("DELETE FROM file_folders");
+      sqlite.exec("DELETE FROM announcements");
+      sqlite.exec("DELETE FROM milestones");
+      sqlite.exec("DELETE FROM channels");
+      try { sqlite.exec("DELETE FROM document_chunks"); } catch {}
+      sqlite.exec("DELETE FROM users");
+
+      // Import users (with original IDs and hashed passwords)
+      for (const u of data.users || []) {
+        sqlite.prepare(`INSERT INTO users (id, username, email, password, display_name, role, title, reports_to, avatar_color, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+          .run(u.id, u.username, u.email, u.password, u.display_name || u.displayName, u.role, u.title || '', u.reports_to || u.reportsTo || null, u.avatar_color || u.avatarColor || '#4F6BED', u.created_at || u.createdAt || '');
+      }
+
+      // Import channels
+      for (const c of data.channels || []) {
+        sqlite.prepare(`INSERT INTO channels (id, name, description, is_default, created_at) VALUES (?, ?, ?, ?, ?)`)
+          .run(c.id, c.name, c.description, c.is_default ?? c.isDefault ?? 0, c.created_at || c.createdAt || '');
+      }
+
+      // Import messages
+      for (const m of data.messages || []) {
+        sqlite.prepare(`INSERT INTO messages (id, channel_id, user_id, content, created_at) VALUES (?, ?, ?, ?, ?)`)
+          .run(m.id, m.channel_id ?? m.channelId, m.user_id ?? m.userId, m.content, m.created_at || m.createdAt || '');
+      }
+
+      // Import tasks
+      for (const t of data.tasks || []) {
+        sqlite.prepare(`INSERT INTO tasks (id, title, description, assigned_to, created_by, status, priority, category, phase, due_date, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+          .run(t.id, t.title, t.description, t.assigned_to ?? t.assignedTo ?? '[]', t.created_by ?? t.createdBy, t.status, t.priority, t.category, t.phase || 'phase-1', t.due_date ?? t.dueDate, t.created_at || t.createdAt || '');
+      }
+
+      // Import task comments
+      for (const c of data.taskComments || []) {
+        sqlite.prepare(`INSERT INTO task_comments (id, task_id, user_id, content, created_at) VALUES (?, ?, ?, ?, ?)`)
+          .run(c.id, c.task_id ?? c.taskId, c.user_id ?? c.userId, c.content, c.created_at || c.createdAt || '');
+      }
+
+      // Import todos
+      for (const t of data.todos || []) {
+        sqlite.prepare(`INSERT INTO todos (id, user_id, content, completed, created_at) VALUES (?, ?, ?, ?, ?)`)
+          .run(t.id, t.user_id ?? t.userId, t.content, t.completed, t.created_at || t.createdAt || '');
+      }
+
+      // Import file folders
+      for (const f of data.fileFolders || []) {
+        sqlite.prepare(`INSERT INTO file_folders (id, name, color, created_by) VALUES (?, ?, ?, ?)`)
+          .run(f.id, f.name, f.color, f.created_by ?? f.createdBy);
+      }
+
+      // Import files
+      for (const f of data.files || []) {
+        sqlite.prepare(`INSERT INTO files (id, user_id, folder_id, original_name, stored_name, size, mime_type, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`)
+          .run(f.id, f.user_id ?? f.userId, f.folder_id ?? f.folderId, f.original_name ?? f.originalName, f.stored_name ?? f.storedName, f.size, f.mime_type ?? f.mimeType, f.created_at || f.createdAt || '');
+      }
+
+      // Import announcements
+      for (const a of data.announcements || []) {
+        sqlite.prepare(`INSERT INTO announcements (id, user_id, title, content, pinned, created_at) VALUES (?, ?, ?, ?, ?, ?)`)
+          .run(a.id, a.user_id ?? a.userId, a.title, a.content, a.pinned, a.created_at || a.createdAt || '');
+      }
+
+      // Import milestones
+      for (const m of data.milestones || []) {
+        sqlite.prepare(`INSERT INTO milestones (id, title, description, status, target_date, sort_order, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)`)
+          .run(m.id, m.title, m.description, m.status, m.target_date ?? m.targetDate, m.sort_order ?? m.sortOrder ?? 0, m.created_at || m.createdAt || '');
+      }
+
+      // Import notifications
+      for (const n of data.notifications || []) {
+        sqlite.prepare(`INSERT INTO notifications (id, user_id, type, title, body, link_to, read, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`)
+          .run(n.id, n.user_id ?? n.userId, n.type, n.title, n.body, n.link_to ?? n.linkTo, n.read, n.created_at || n.createdAt || '');
+      }
+
+      // Import message reactions
+      for (const r of data.messageReactions || []) {
+        sqlite.prepare(`INSERT OR IGNORE INTO message_reactions (id, message_id, user_id, emoji) VALUES (?, ?, ?, ?)`)
+          .run(r.id, r.message_id ?? r.messageId, r.user_id ?? r.userId, r.emoji);
+      }
+
+      // Import calendar events
+      for (const e of data.calendarEvents || []) {
+        sqlite.prepare(`INSERT INTO calendar_events (id, title, description, user_id, start_date, end_date, all_day, type, color, attendees, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+          .run(e.id, e.title, e.description, e.user_id ?? e.userId, e.start_date ?? e.startDate, e.end_date ?? e.endDate, e.all_day ?? e.allDay ?? 0, e.type, e.color, e.attendees || '[]', e.created_at || e.createdAt || '');
+      }
+
+      // Import meeting requests
+      for (const m of data.meetingRequests || []) {
+        sqlite.prepare(`INSERT INTO meeting_requests (id, requester_id, recipient_ids, title, description, proposed_start_date, proposed_end_date, all_day, status, responses, response_message, proposed_new_start_date, proposed_new_end_date, calendar_event_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+          .run(m.id, m.requester_id ?? m.requesterId, m.recipient_ids ?? m.recipientIds ?? '[]', m.title, m.description, m.proposed_start_date ?? m.proposedStartDate, m.proposed_end_date ?? m.proposedEndDate, m.all_day ?? m.allDay ?? 0, m.status, m.responses ?? '{}', m.response_message ?? m.responseMessage ?? '', m.proposed_new_start_date ?? m.proposedNewStartDate, m.proposed_new_end_date ?? m.proposedNewEndDate, m.calendar_event_id ?? m.calendarEventId, m.created_at || m.createdAt || '', m.updated_at || m.updatedAt || '');
+      }
+
+      // Import knowledge articles
+      for (const a of data.knowledgeArticles || []) {
+        sqlite.prepare(`INSERT INTO knowledge_articles (id, title, content, category, attachments, created_by, updated_by, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+          .run(a.id, a.title, a.content, a.category, a.attachments || '[]', a.created_by ?? a.createdBy, a.updated_by ?? a.updatedBy, a.created_at || a.createdAt || '', a.updated_at || a.updatedAt || '');
+      }
+
+      res.json({ ok: true, message: "Data imported successfully" });
+    } catch (err: any) {
+      console.error("[import] Error:", err);
+      res.status(500).json({ message: `Import failed: ${err.message}` });
+    }
   });
 
   // ── Dashboard Stats ──────────────────────────────

@@ -27,7 +27,7 @@ import path from "path";
 // Use DATABASE_PATH env var for Railway Volume persistence, default to local
 const dbPath = process.env.DATABASE_PATH || "data.db";
 console.log(`[db] Using database at: ${dbPath}`);
-const sqlite = new Database(dbPath);
+export const sqlite = new Database(dbPath);
 sqlite.pragma("journal_mode = WAL");
 
 export const db = drizzle(sqlite);
