@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useRef } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { useAuth } from "@/hooks/use-auth";
 import { apiRequest, queryClient } from "@/lib/queryClient";
@@ -19,7 +19,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Merge } from "lucide-react";
+import { Merge, Download, Upload, Loader2 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import type { User } from "@shared/schema";
 
@@ -40,6 +40,46 @@ export default function TeamPage() {
   const isAdmin = user?.role === "admin";
   const [mergeUser, setMergeUser] = useState<TeamMember | null>(null);
   const [mergeTarget, setMergeTarget] = useState<string>("");
+  const [exporting, setExporting] = useState(false);
+  const [importing, setImporting] = useState(false);
+  const importFileRef = useRef<HTMLInputElement>(null);
+
+  async function handleExport() {
+    setExporting(true);
+    try {
+      const res = await apiRequest("GET", "/api/admin/export");
+      const data = await res.json();
+      const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `hub-export-${new Date().toISOString().slice(0, 10)}.json`;
+      a.click();
+      URL.revokeObjectURL(url);
+      toast({ title: "Database exported" });
+    } catch (err: any) {
+      toast({ title: "Export failed", variant: "destructive" });
+    }
+    setExporting(false);
+  }
+
+  async function handleImport(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setImporting(true);
+    try {
+      const text = await file.text();
+      const data = JSON.parse(text);
+      const res = await apiRequest("POST", "/api/admin/import", data);
+      const result = await res.json();
+      toast({ title: result.message || "Data imported" });
+      queryClient.invalidateQueries();
+    } catch (err: any) {
+      toast({ title: "Import failed", variant: "destructive" });
+    }
+    setImporting(false);
+    e.target.value = "";
+  }
 
   const { data: team, isLoading } = useQuery<TeamMember[]>({
     queryKey: ["/api/team"],
@@ -73,11 +113,26 @@ export default function TeamPage() {
 
   return (
     <div className="p-6 max-w-5xl mx-auto space-y-6">
-      <div>
-        <h1 className="text-xl font-semibold">Team</h1>
-        <p className="text-sm text-muted-foreground mt-1">
-          {team?.length ?? 0} members
-        </p>
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-xl font-semibold">Team</h1>
+          <p className="text-sm text-muted-foreground mt-1">
+            {team?.length ?? 0} members
+          </p>
+        </div>
+        {isAdmin && (
+          <div className="flex gap-2">
+            <Button variant="outline" size="sm" onClick={handleExport} disabled={exporting}>
+              {exporting ? <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" /> : <Download className="h-3.5 w-3.5 mr-1" />}
+              {exporting ? "Exporting..." : "Export Data"}
+            </Button>
+            <input ref={importFileRef} type="file" accept=".json" className="hidden" onChange={handleImport} />
+            <Button variant="outline" size="sm" onClick={() => importFileRef.current?.click()} disabled={importing}>
+              {importing ? <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" /> : <Upload className="h-3.5 w-3.5 mr-1" />}
+              {importing ? "Importing..." : "Import Data"}
+            </Button>
+          </div>
+        )}
       </div>
 
       {isLoading ? (
