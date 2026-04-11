@@ -16,6 +16,7 @@ import {
   type DocumentChunk, type InsertDocumentChunk, documentChunks,
   type AiConversation, type InsertAiConversation, aiConversations,
   type AiMessage, type InsertAiMessage, aiMessages,
+  type KnowledgeArticle, type InsertKnowledgeArticle, knowledgeArticles,
 } from "@shared/schema";
 import { drizzle } from "drizzle-orm/better-sqlite3";
 import Database from "better-sqlite3";
@@ -133,6 +134,13 @@ export interface IStorage {
   // Auth helpers
   verifyPassword(plain: string, hash: string): boolean;
   hashPassword(plain: string): string;
+
+  // Knowledge Base
+  getAllKnowledgeArticles(): KnowledgeArticle[];
+  getKnowledgeArticle(id: number): KnowledgeArticle | undefined;
+  createKnowledgeArticle(data: InsertKnowledgeArticle): KnowledgeArticle;
+  updateKnowledgeArticle(id: number, data: Partial<InsertKnowledgeArticle>): KnowledgeArticle | undefined;
+  deleteKnowledgeArticle(id: number): void;
 
   // Document Chunks (RAG)
   getChunksBySource(sourceType: string, sourceId: number): DocumentChunk[];
@@ -424,6 +432,23 @@ export class DatabaseStorage implements IStorage {
     db.delete(meetingRequests).where(eq(meetingRequests.id, id)).run();
   }
 
+  // ── Knowledge Base ──
+  getAllKnowledgeArticles(): KnowledgeArticle[] {
+    return db.select().from(knowledgeArticles).orderBy(desc(knowledgeArticles.id)).all();
+  }
+  getKnowledgeArticle(id: number): KnowledgeArticle | undefined {
+    return db.select().from(knowledgeArticles).where(eq(knowledgeArticles.id, id)).get();
+  }
+  createKnowledgeArticle(data: InsertKnowledgeArticle): KnowledgeArticle {
+    return db.insert(knowledgeArticles).values({ ...data, createdAt: now(), updatedAt: now() }).returning().get();
+  }
+  updateKnowledgeArticle(id: number, data: Partial<InsertKnowledgeArticle>): KnowledgeArticle | undefined {
+    return db.update(knowledgeArticles).set({ ...data, updatedAt: now() }).where(eq(knowledgeArticles.id, id)).returning().get();
+  }
+  deleteKnowledgeArticle(id: number): void {
+    db.delete(knowledgeArticles).where(eq(knowledgeArticles.id, id)).run();
+  }
+
   // ── Document Chunks ──
   getChunksBySource(sourceType: string, sourceId: number): DocumentChunk[] {
     return db.select().from(documentChunks).where(and(eq(documentChunks.sourceType, sourceType), eq(documentChunks.sourceId, sourceId))).all();
@@ -693,6 +718,17 @@ export class DatabaseStorage implements IStorage {
         proposed_new_start_date TEXT,
         proposed_new_end_date TEXT,
         calendar_event_id INTEGER,
+        created_at TEXT NOT NULL DEFAULT '',
+        updated_at TEXT NOT NULL DEFAULT ''
+      );
+      CREATE TABLE IF NOT EXISTS knowledge_articles (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        title TEXT NOT NULL,
+        content TEXT NOT NULL DEFAULT '',
+        category TEXT NOT NULL DEFAULT 'general',
+        attachments TEXT NOT NULL DEFAULT '[]',
+        created_by INTEGER NOT NULL,
+        updated_by INTEGER,
         created_at TEXT NOT NULL DEFAULT '',
         updated_at TEXT NOT NULL DEFAULT ''
       );

@@ -882,6 +882,77 @@ export async function registerRoutes(
     res.json({ ok: true });
   });
 
+  // ── Knowledge Base Routes ────────────────────────
+  app.get("/api/knowledge", requireAuth, (_req, res) => {
+    const articles = storage.getAllKnowledgeArticles();
+    const allUsers = storage.getAllUsers();
+    const userMap = new Map(allUsers.map(u => [u.id, safeUser(u)]));
+    const allFiles = storage.getAllFiles();
+    const fileMap = new Map(allFiles.map(f => [f.id, f]));
+    res.json(articles.map(a => {
+      const attachmentIds: number[] = (() => { try { return JSON.parse(a.attachments); } catch { return []; } })();
+      return {
+        ...a,
+        createdByUser: userMap.get(a.createdBy),
+        updatedByUser: a.updatedBy ? userMap.get(a.updatedBy) : null,
+        attachmentFiles: attachmentIds.map(id => fileMap.get(id)).filter(Boolean),
+      };
+    }));
+  });
+
+  app.get("/api/knowledge/:id", requireAuth, (req, res) => {
+    const article = storage.getKnowledgeArticle(Number(req.params.id));
+    if (!article) return res.status(404).json({ message: "Article not found" });
+    const allUsers = storage.getAllUsers();
+    const userMap = new Map(allUsers.map(u => [u.id, safeUser(u)]));
+    const allFiles = storage.getAllFiles();
+    const fileMap = new Map(allFiles.map(f => [f.id, f]));
+    const attachmentIds: number[] = (() => { try { return JSON.parse(article.attachments); } catch { return []; } })();
+    res.json({
+      ...article,
+      createdByUser: userMap.get(article.createdBy),
+      updatedByUser: article.updatedBy ? userMap.get(article.updatedBy) : null,
+      attachmentFiles: attachmentIds.map(id => fileMap.get(id)).filter(Boolean),
+    });
+  });
+
+  app.post("/api/knowledge", requireAuth, (req, res) => {
+    const user = req.user as any;
+    const article = storage.createKnowledgeArticle({ ...req.body, createdBy: user.id });
+    broadcastAll("knowledge:created", article);
+    res.json(article);
+  });
+
+  app.put("/api/knowledge/:id", requireAuth, (req, res) => {
+    const user = req.user as any;
+    const updated = storage.updateKnowledgeArticle(Number(req.params.id), { ...req.body, updatedBy: user.id });
+    if (!updated) return res.status(404).json({ message: "Article not found" });
+    broadcastAll("knowledge:updated", updated);
+    res.json(updated);
+  });
+
+  app.delete("/api/knowledge/:id", requireAuth, (req, res) => {
+    storage.deleteKnowledgeArticle(Number(req.params.id));
+    broadcastAll("knowledge:deleted", { id: Number(req.params.id) });
+    res.json({ ok: true });
+  });
+
+  // Upload attachment for knowledge base article
+  app.post("/api/knowledge/upload", requireAuth, upload.single("file"), (req, res) => {
+    const user = req.user as any;
+    const file = req.file;
+    if (!file) return res.status(400).json({ message: "No file uploaded" });
+    const record = storage.createFile({
+      userId: user.id,
+      folderId: null,
+      originalName: file.originalname,
+      storedName: file.filename,
+      size: file.size,
+      mimeType: file.mimetype,
+    });
+    res.json(record);
+  });
+
   // ── AI Routes ────────────────────────────────────
   app.get("/api/ai/status", requireAuth, (_req, res) => {
     res.json({

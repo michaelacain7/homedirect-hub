@@ -18,6 +18,7 @@ import MeetingsPage from "@/pages/meetings";
 import TaskTrackingPage from "@/pages/task-tracking";
 import OrgChartPage from "@/pages/org-chart";
 import AIAssistantPage from "@/pages/ai-assistant";
+import KnowledgeBasePage from "@/pages/knowledge-base";
 import NotFound from "@/pages/not-found";
 import { Loader2 } from "lucide-react";
 
@@ -45,6 +46,7 @@ function AppRouter() {
         <Route path="/tasks" component={TasksPage} />
         <Route path="/tracking" component={TaskTrackingPage} />
         <Route path="/todos" component={TodosPage} />
+        <Route path="/knowledge" component={KnowledgeBasePage} />
         <Route path="/files" component={FilesPage} />
         <Route path="/calendar" component={CalendarPage} />
         <Route path="/meetings" component={MeetingsPage} />

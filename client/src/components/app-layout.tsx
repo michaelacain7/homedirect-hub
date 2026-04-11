@@ -29,6 +29,7 @@ import {
   BarChart3,
   Network,
   Bot,
+  BookOpen,
 } from "lucide-react";
 
 // ── Notification Bell Component ──────────────────
@@ -226,6 +227,7 @@ const navItems = [
   { href: "/todos", label: "My To-Do", icon: CheckSquare },
   { href: "/calendar", label: "Calendar", icon: CalendarDays },
   { href: "/meetings", label: "Meetings", icon: Handshake },
+  { href: "/knowledge", label: "Knowledge", icon: BookOpen },
   { href: "/files", label: "Files", icon: FolderOpen },
   { href: "/org-chart", label: "Org Chart", icon: Network },
   { href: "/team", label: "Team", icon: Users },
