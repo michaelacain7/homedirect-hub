@@ -39,7 +39,7 @@ import fs from "fs";
 import crypto from "crypto";
 
 // ── File Upload Setup ──────────────────────────────
-const uploadDir = path.resolve("uploads");
+const uploadDir = process.env.UPLOAD_PATH || path.resolve("uploads");
 if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir, { recursive: true });
 
 const upload = multer({
