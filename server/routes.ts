@@ -53,7 +53,13 @@ const upload = multer({
   limits: { fileSize: 50 * 1024 * 1024 }, // 50MB
 });
 
-// ── WebSocket Tracking ─────────────────────────────
+// ── Screen Share Tracking ─────────────────────────
+interface ScreenSession {
+  hostId: number;
+  hostName: string;
+  startedAt: string;
+}
+const activeScreenShares = new Map<number, ScreenSession>(); // keyed by host userId
 interface WSClient {
   ws: WebSocket;
   userId: number;
@@ -1282,10 +1288,60 @@ Current date: ${new Date().toLocaleDateString()}`;
             }, msg.data.channelId);
           }
         }
+
+        // ── Screen Share Signaling ──────────────────
+        if (msg.event === "screen:start") {
+          const client = wsClients.get(ws);
+          if (client) {
+            const user = storage.getUser(client.userId);
+            activeScreenShares.set(client.userId, {
+              hostId: client.userId,
+              hostName: user?.displayName || client.username,
+              startedAt: new Date().toISOString(),
+            });
+            broadcastAll("screen:started", {
+              hostId: client.userId,
+              hostName: user?.displayName || client.username,
+            });
+          }
+        }
+
+        if (msg.event === "screen:stop") {
+          const client = wsClients.get(ws);
+          if (client) {
+            activeScreenShares.delete(client.userId);
+            broadcastAll("screen:stopped", { hostId: client.userId });
+          }
+        }
+
+        if (msg.event === "screen:list") {
+          const sessions = Array.from(activeScreenShares.values());
+          ws.send(JSON.stringify({ event: "screen:list", data: sessions }));
+        }
+
+        // WebRTC signaling relay - forward to specific user
+        if (msg.event === "screen:offer" || msg.event === "screen:answer" || msg.event === "screen:ice-candidate") {
+          const client = wsClients.get(ws);
+          if (client && msg.data.targetUserId) {
+            wsClients.forEach((target) => {
+              if (target.userId === msg.data.targetUserId && target.ws.readyState === WebSocket.OPEN) {
+                target.ws.send(JSON.stringify({
+                  event: msg.event,
+                  data: { ...msg.data, fromUserId: client.userId },
+                }));
+              }
+            });
+          }
+        }
       } catch {}
     });
 
     ws.on("close", () => {
+      const client = wsClients.get(ws);
+      if (client && activeScreenShares.has(client.userId)) {
+        activeScreenShares.delete(client.userId);
+        broadcastAll("screen:stopped", { hostId: client.userId });
+      }
       wsClients.delete(ws);
       broadcastAll("online:update", getOnlineUsers());
     });

@@ -19,6 +19,7 @@ import TaskTrackingPage from "@/pages/task-tracking";
 import OrgChartPage from "@/pages/org-chart";
 import AIAssistantPage from "@/pages/ai-assistant";
 import KnowledgeBasePage from "@/pages/knowledge-base";
+import ScreenSharePage from "@/pages/screen-share";
 import NotFound from "@/pages/not-found";
 import { Loader2 } from "lucide-react";
 
@@ -50,6 +51,7 @@ function AppRouter() {
         <Route path="/files" component={FilesPage} />
         <Route path="/calendar" component={CalendarPage} />
         <Route path="/meetings" component={MeetingsPage} />
+        <Route path="/screen-share" component={ScreenSharePage} />
         <Route path="/org-chart" component={OrgChartPage} />
         <Route path="/team" component={TeamPage} />
         <Route component={NotFound} />

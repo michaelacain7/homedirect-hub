@@ -30,6 +30,7 @@ import {
   Network,
   Bot,
   BookOpen,
+  ScreenShare,
 } from "lucide-react";
 
 // ── Notification Bell Component ──────────────────
@@ -227,6 +228,7 @@ const navItems = [
   { href: "/todos", label: "My To-Do", icon: CheckSquare },
   { href: "/calendar", label: "Calendar", icon: CalendarDays },
   { href: "/meetings", label: "Meetings", icon: Handshake },
+  { href: "/screen-share", label: "Screen Share", icon: ScreenShare },
   { href: "/knowledge", label: "Knowledge", icon: BookOpen },
   { href: "/files", label: "Files", icon: FolderOpen },
   { href: "/org-chart", label: "Org Chart", icon: Network },
